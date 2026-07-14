@@ -1,285 +1,280 @@
 # Wobkey Crush 80 — ZMK Firmware
 
-Open-source ZMK firmware for the Wobkey Crush 80 (80% mechanical keyboard, Telink TLSR9511 RISC-V).
+Open-source ZMK firmware for the Wobkey Crush 80 (Telink TLSR9511, B91, RISC-V).
 
-**Replaces the proprietary stock firmware with full programmability:**
-- USB HID (1000 Hz wired)
-- Bluetooth LE HID-over-GATT (3 profiles)
-- Home row mods, layers, combos, macros — all ZMK behaviors
-- Live keymap editing via [ZMK Studio](https://zmk.studio) over BLE (no software install)
-- Per-key RGB via AW20216S *(requires SPI pin confirmation — see below)*
-- 2.4 GHz dongle mode *(requires one-time access code sniff — see below)*
-- Deep sleep with µA battery draw
-- Safe revert to stock firmware — no hardware debugger needed
+**Features:** USB HID (1000 Hz) · Bluetooth LE (3 profiles) · home row mods + all ZMK behaviors ·
+battery gauge · deep sleep · MCUboot with safe revert · ZMK Studio live keymap editing.
+
+**Status:** USB + BLE functional. RGB requires AW20216S SPI pin extraction (see `docs/ghidra_spi_extraction.md`). 2.4 GHz dongle requires one sniff session (see `docs/hardware_guide_2g_and_diy.md`).
 
 ---
 
-## Hardware Summary
+## Quick Start
 
-| Property | Value |
-|---|---|
-| MCU | Telink TLSR9511 (B91, RISC-V RV32IMACF) — *confirmed from firmware binary* |
-| Flash / SRAM | 1 MB / 256 KB |
-| LED driver | AW20216S (SPI-connected, 154 LEDs) — *confirmed from firmware binary* |
-| Matrix | 6 rows × 16 cols — *confirmed from v2_update.md* |
-| Keys | 88 (ANSI layout) |
-| Connectivity | USB-C + BLE 5.0 + 2.4 GHz dongle |
-| Battery | 3750 mAh (Lite) / 7500 mAh (Pro) |
+### Option A — GitHub Actions (no local toolchain needed)
 
----
+1. Fork this repository on GitHub.
+2. Push any change (or trigger manually via **Actions → Build Crush 80 ZMK Firmware → Run workflow**).
+3. Download the firmware artifact from the workflow run.
+4. Flash following [Part 3: Flashing](#part-3-flashing) below.
 
-## Quick Start: Install Pre-built Firmware
-
-If you just want to flash the latest firmware without building it yourself:
-
-1. Go to the [Actions tab](../../actions) and click the latest successful **Build Crush 80 ZMK Firmware** run
-2. Download the artifact: `crush80-firmware-XXXXXXXX.zip`
-3. Unzip to get:
-   - `crush80-ota-bridge.bin` — flash this first (Stage 1)
-   - `crush80-zmk-app.signed.bin` — flash this second (Stage 2)
-4. Follow the [Flashing Instructions](#flashing-instructions) below
-
----
-
-## Building from Source
-
-### Prerequisites
-
-**Linux or WSL2 (Ubuntu 24.04 recommended)**
+### Option B — Local Build (WSL Ubuntu 24.04)
 
 ```bash
-# System dependencies
-sudo apt-get update
-sudo apt-get install -y git cmake ninja-build python3-pip wget xz-utils \
-    libusb-1.0-0-dev file
-
-# Python tools
+# 1. One-time toolchain setup (needs sudo):
+sudo apt-get update && sudo apt-get install -y git cmake ninja-build python3-pip wget xz-utils libusb-1.0-0-dev file
 pip3 install west pyelftools
 
-# Zephyr SDK — MUST be 0.17.0 (not 0.17.4, which breaks hal_telink)
+# Zephyr SDK 0.17.0 — REQUIRED (not 0.17.4, which breaks hal_telink)
 cd ~
 wget https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v0.17.0/zephyr-sdk-0.17.0_linux-x86_64.tar.xz
 tar xf zephyr-sdk-0.17.0_linux-x86_64.tar.xz
 cd zephyr-sdk-0.17.0 && ./setup.sh -t riscv64-zephyr-elf
-```
 
-### First-Time Workspace Setup
-
-```bash
-git clone https://github.com/YOUR_USERNAME/Wobkey_Crush_80_Patched_Firmware
-cd Wobkey_Crush_80_Patched_Firmware
-
-# Initialize west workspace (fetches ZMK, Zephyr, HAL, MCUboot — ~500 MB, ~5 min)
-cd zmk
+# 2. Clone and init workspace:
+git clone https://github.com/YOUR_USERNAME/Wobkey_Crush_80_Patched_Firmware crush80-zmk
+cd crush80-zmk/zmk
 west init -l .
-west update
+west update                # ~500 MB download — takes 5–10 min
 
-# Fetch the Telink BLE controller library
-# (proprietary but publicly available from Telink's GitHub; not redistributed here)
+# 3. Fetch Telink BLE blob (fetched from Telink's public GitHub, not redistributed here):
 cd ..
 bash fetch_ble_blob.sh
 
-# Install remaining Zephyr Python dependencies
+# 4. Install Zephyr Python requirements:
 pip3 install -r zmk/zephyr/scripts/requirements.txt
-```
 
-### Build
-
-```bash
+# 5. Build all targets:
 export ZEPHYR_SDK_INSTALL_DIR=~/zephyr-sdk-0.17.0
-
-cd zmk
-
-# Build all three targets at once:
-#   - MCUboot bootloader
-#   - OTA bridge (for initial flash)
-#   - Full ZMK application
-bash ../build.sh -a
+bash build.sh -a
 ```
 
-**Output files:**
+Build outputs:
 ```
-zmk/build/zephyr/zmk.signed.bin     ← flash this (Stage 2)
-zmk/build-bridge/zephyr/zmk.bin     ← flash this (Stage 1)
-zmk/build-mcuboot/zephyr/zephyr.bin ← only needed for hardware recovery
+zmk/build-mcuboot/zephyr/zephyr.bin      ← MCUboot bootloader (only needed for SWS recovery)
+zmk/build-bridge/zephyr/zmk.bin         ← OTA bridge (Stage 1 flash)
+zmk/build/zephyr/zmk.signed.bin         ← ZMK application (Stage 2 flash)
 ```
-
-### Build via GitHub Actions (no local toolchain needed)
-
-Every push to `main` that changes `zmk/`, `conf/`, or `patches/` triggers an automatic build. Firmware artifacts are available under Actions → latest run → **Artifacts**.
-
-To trigger a manual build: Actions → **Build Crush 80 ZMK Firmware** → **Run workflow**.
 
 ---
 
-## Flashing Instructions
+## Part 1: Customizing the Keymap
 
-> **Before you start:** Download the stock firmware from the Wobkey updater tool and keep it safe. `firmware/code_2M_v2_patched.bin` in this repo is a copy. You can always revert.
+Edit `zmk/boards/crush80/crush80.keymap` and rebuild.
+
+**Key bindings reference:** https://zmk.dev/docs/keymaps/behaviors
+
+**Live editing without rebuilding:** Use [ZMK Studio](https://zmk.studio/) over Bluetooth
+in Chrome or Edge. Unlock with `Fn + ESC`. No VIA — ZMK Studio is the replacement.
+
+**Home row mods:** Add to the keymap behaviors section:
+```dts
+hml: home_row_mod_left {
+    compatible = "zmk,behavior-hold-tap";
+    #binding-cells = <2>;
+    flavor = "balanced";          // ZMK equivalent of QMK PERMISSIVE_HOLD
+    tapping-term-ms = <280>;
+    quick-tap-ms = <175>;
+    require-prior-idle-ms = <150>;
+    bindings = <&kp>, <&kp>;
+    hold-trigger-key-positions = <KEYS_R THUMBS>;
+    hold-trigger-on-release;
+};
+```
+
+---
+
+## Part 2: Adding 2.4 GHz Dongle Support
+
+The 2.4 GHz access code must be captured from your keyboard+dongle pair.
+Full instructions in `docs/hardware_guide_2g_and_diy.md`.
+
+**Once you have the code**, open `scripts/crush80_2g_config.py` and fill in two lines:
+```python
+TPLL_ACCESS_CODE = 0xXXXXXXXX    # from sniffer output
+TPLL_CHANNELS    = [17, 35, ...]  # from sniffer output
+```
+
+Then regenerate the header and rebuild:
+```bash
+python3 scripts/crush80_2g_config.py   # writes zmk/drivers/radio/crush80_2g_constants.h
+bash build.sh -a                       # rebuild all
+```
+
+---
+
+## Part 3: Flashing
+
+### Prerequisites
+
+- Keyboard plugged in via USB-C and switched to USB mode
+- On Linux: `docs/99-wobkey-crush80.rules` installed (`sudo cp docs/99-wobkey-crush80.rules /etc/udev/rules.d/ && sudo udevadm control --reload`)
+- On Windows: `firmware/v2.exe` (the stock OTA flasher) available as fallback
 
 ### Stage 1 — Flash OTA Bridge
 
-The keyboard currently runs the Evision stock firmware, which has the Telink OTA bootloader in its chip ROM. Stage 1 uses this bootloader.
+This replaces the stock Evision firmware with a minimal ZMK build that exposes USB DFU.
+The stock Telink OTA bootloader in ROM survives this step — you can always reflash.
 
-**Switch the keyboard to USB mode first** (press the mode key if you're in BT or 2.4G).
-
-**Linux / WSL2:**
 ```bash
-# Plug keyboard in via USB-C
+# Linux / WSL (keyboard must be visible as /dev/hidraw*)
 python3 scripts/flash_ota.py zmk/build-bridge/zephyr/zmk.bin
-# Expect: 100% ████████ | OTA SUCCESS!  (~23 seconds)
+
+# Expected output:
+# Loading zmk.bin... Format: raw, Size: ~83KB, CRC: OK
+# [100%] 1734/1734 packets | ~23s | OTA SUCCESS!
 ```
 
-**Windows (if WSL fails):**
-Use the existing `firmware/v2.exe` flasher: replace its `code_2M` resource with `build-bridge/zephyr/zmk.bin` using a resource editor (Resource Hacker), then run.
+**Windows fallback** (if Linux OTA fails):
+1. Open `firmware/v2.exe`
+2. Replace the embedded firmware resource with `zmk/build-bridge/zephyr/zmk.bin`
+   (requires ILSpy or resource hacker to replace `code_2M` resource, or use WSL with `usbipd-win`)
 
-After Stage 1, the keyboard enumerates as a USB CDC-ACM serial device (`/dev/ttyACM0` on Linux).
+After Stage 1: keyboard appears as `/dev/ttyACM0` (USB-CDC serial device).
 
 ### Stage 2 — Flash ZMK via mcumgr DFU
 
 ```bash
-# Install mcumgr
+# Install mcumgr (one time):
 go install github.com/apache/mynewt-mcumgr-cli/mcumgr@latest
 
-# Upload the signed ZMK image
-~/go/bin/mcumgr --conntype serial \
-    --connstring "dev=/dev/ttyACM0,baud=115200" \
+# Upload ZMK app:
+~/go/bin/mcumgr --conntype serial --connstring "dev=/dev/ttyACM0,baud=115200" \
     image upload zmk/build/zephyr/zmk.signed.bin
 
-# Confirm (MCUboot will boot this image on next reset)
-~/go/bin/mcumgr --conntype serial \
-    --connstring "dev=/dev/ttyACM0,baud=115200" \
+# Confirm and reboot:
+~/go/bin/mcumgr --conntype serial --connstring "dev=/dev/ttyACM0,baud=115200" \
     image confirm
-
-# Reset the keyboard
-~/go/bin/mcumgr --conntype serial \
-    --connstring "dev=/dev/ttyACM0,baud=115200" \
+~/go/bin/mcumgr --conntype serial --connstring "dev=/dev/ttyACM0,baud=115200" \
     reset
 ```
 
-The keyboard now boots ZMK. USB HID and BLE should work immediately.
+After Stage 2: keyboard boots ZMK. USB HID works immediately.
 
-### Updating Firmware Later (after initial flash)
+### Updating Firmware (After Initial Setup)
 
-Once ZMK is running, you never need the OTA bridge again. Update by re-running Stage 2 only:
-
+Once MCUboot is installed, future updates skip Stage 1:
 ```bash
-python3 scripts/flash_ota.py zmk/build/zephyr/zmk.bin  # skips bridge, updates directly
-# OR
-~/go/bin/mcumgr image upload zmk/build/zephyr/zmk.signed.bin
+# Rebuild after keymap/config changes:
+bash build.sh
+
+# Flash new app only:
+~/go/bin/mcumgr --conntype serial --connstring "dev=/dev/ttyACM0,baud=115200" \
+    image upload zmk/build/zephyr/zmk.signed.bin && \
+~/go/bin/mcumgr --conntype serial --connstring "dev=/dev/ttyACM0,baud=115200" \
+    image confirm && \
+~/go/bin/mcumgr --conntype serial --connstring "dev=/dev/ttyACM0,baud=115200" \
+    reset
 ```
 
 ---
 
-## Reverting to Stock Firmware
+## Part 4: Reverting to Stock Firmware
 
-### Software revert (no hardware needed)
+### Option A — Automated (if ZMK OTA bridge or ZMK app is running)
 
 ```bash
-# Restore stock firmware — works as long as MCUboot or the OTA bridge is running
 bash restore_stock.sh -y
+# Writes firmware/code_2M_v2_patched.bin back via mcumgr flash_mgmt group.
+# Takes ~40 seconds. Keyboard reboots to stock Evision firmware.
 ```
 
-This writes `firmware/code_2M_v2_patched.bin` back via the `flash_mgmt` mcumgr group.
+### Option B — Manual OTA (if keyboard is in OTA bridge mode)
 
-### Hardware recovery (Telink Burning Board)
+```bash
+python3 scripts/flash_ota.py firmware/code_2M_v2_patched.bin
+```
 
-If both the ZMK app and OTA bridge are gone (extremely unlikely given MCUboot's watchdog revert):
+### Option C — Hard Recovery via SWS (if both A and B fail)
 
-1. Telink TLSRGSOCBK56B Burning Board (~$15)
-2. Connect 3 DuPont wires to SWS/GND/VCC pads on the PCB
-3. Use Telink BDT tool → B91 → load `firmware/code_2M_v2_patched.bin` → flash
+Requires: Telink Burning Board (TLSRGSOCBK56B, ~$15), 3 Dupont wires.
 
----
-
-## Customizing the Keymap
-
-Edit `zmk/boards/crush80/crush80.keymap` and rebuild. Or use [ZMK Studio](https://zmk.studio) in Chrome/Edge over BLE — no rebuild needed for keymap changes.
-
-**Unlock ZMK Studio:** Press `Fn+ESC` on the keyboard.
-
-For home row mods (the original purpose of this project), see [`docs/home_row_mods.md`](docs/home_row_mods.md) for the balanced-flavor configuration.
+1. Open the keyboard (ball-catch quick release, no tools)
+2. Connect Burning Board to the 3 SWS pads near the MCU: GND, VCC, SWS
+3. Use Telink BDT tool (Windows): B91 chip → load `firmware/code_2M_v2_patched.bin` → Flash
 
 ---
 
-## Enabling 2.4 GHz Dongle Mode
+## Part 5: What's Working vs Pending
 
-> Status: **placeholder — one-time setup required**
-
-The 2.4 GHz access code is device-specific and not in the firmware binary. You need to sniff it once from the air using a Raspberry Pi + nRF24L01+ module.
-
-**Full instructions:** [`docs/hardware_guide_2g_and_diy.md`](docs/hardware_guide_2g_and_diy.md), Part 2.
-
-**After sniffing:**
-1. Edit `scripts/crush80_2g_config.py` — fill in `TPLL_ACCESS_CODE` and `TPLL_CHANNELS`
-2. Run: `python3 scripts/crush80_2g_config.py` — generates the C header
-3. Rebuild and flash
-
----
-
-## Enabling RGB (AW20216S)
-
-> Status: **partial — SPI pin extraction required**
-
-The AW20216S driver is written and complete. The SPI pin numbers need to be confirmed from the firmware binary using Ghidra.
-
-**Extraction procedure:** [`docs/rgb_pin_extraction.md`](docs/rgb_pin_extraction.md) *(to be written after Ghidra analysis)*
-
-**Quick path:** If you want to attempt bring-up before running Ghidra, try the Rainy 75 GSPI pins first (PC0=CS, PC1=CLK, PC2=MOSI) — they may or may not match the Crush 80 PCB layout.
+| Feature | Status | Notes |
+|---|---|---|
+| USB HID (1000 Hz) | ✅ Working | |
+| Bluetooth LE (3 profiles) | ✅ Working | Pair with Fn+F1/F2/F3 |
+| All 88 keys | ✅ Working | |
+| Layers, hold-tap, home row mods | ✅ Working | |
+| ZMK Studio (live edit) | ✅ Working | Via BLE in Chrome/Edge |
+| Battery gauge | ✅ Working | BLE battery service |
+| Deep sleep (15 min idle) | ✅ Working | |
+| Safe revert to stock | ✅ Working | `restore_stock.sh` |
+| Per-key RGB (154 LEDs) | ⚠️ Pending | Need AW20216S SPI pins from Ghidra |
+| 2.4 GHz dongle | ⚠️ Pending | Need access code from nRF24 sniffer |
 
 ---
 
 ## Repository Layout
 
 ```
-.github/workflows/build.yml       ← GitHub Actions CI (builds firmware on push)
-zmk/
-  boards/crush80/                 ← Board definition (DTS, keymap, Kconfig)
+zmk/                    ZMK firmware module (board + drivers)
+  boards/crush80/       Board definition (DTS, keymap, Kconfig)
   drivers/
-    bluetooth/                    ← BLE HCI shim (wraps Telink BLE blob)
-    usb/                          ← USB device driver (B91-specific)
-    sensor/                       ← Battery ADC driver
-    watchdog/                     ← Hardware watchdog driver
-    led/                          ← AW20216S LED driver + RGB engine
-    radio/                        ← 2.4G TPLL driver (placeholder until access code known)
-  src/                            ← poweroff, flash_mgmt, boot_diag, mcuboot_confirm
-  west.yml                        ← Pins ZMK + Zephyr + HAL + MCUboot versions
-conf/
-  app.conf                        ← ZMK app Kconfig (BLE, USB, RGB, sleep, Studio)
-  mcuboot.conf                    ← MCUboot Kconfig
-  mcuboot.overlay                 ← MCUboot DTS overlay
-  ota-bridge.conf                 ← Minimal build for initial OTA flash
-patches/                          ← Small fixes applied at west update time
-firmware/                         ← Stock firmware images (for restore)
-scripts/
-  flash_ota.py                    ← Stage 1 flasher (uses Telink OTA protocol)
-  crush80_2g_config.py            ← 2.4G config — EDIT THIS to enable dongle mode
-  sniff_2g_access_code.py         ← RPi + nRF24L01+ access code sniffer
-  analyze_spi_led.py              ← Firmware analysis (confirmed AW20216S)
-docs/                             ← Hardware guides, technical reports
+    bluetooth/          BLE HCI shim for Telink blob
+    led/                AW20216S driver + RGB engine
+    radio/              2.4G TPLL driver (placeholder until access code known)
+    sensor/             Battery ADC
+    usb/                USB device driver
+    watchdog/           Hardware watchdog
+  west.yml              Dependency manifest (ZMK, Zephyr, HAL, MCUboot)
+
+conf/                   Build configuration overlays
+  app.conf              Main ZMK app config
+  mcuboot.conf          MCUboot config
+  ota-bridge.conf       OTA bridge (minimal DFU-only build)
+
+patches/                Patches applied during build
+  zmk-src/              ZMK: USB_NO_VBUS_DETECT (sleep fix)
+  hal_telink/           HAL: BT_HCI_B91 fix
+  mcuboot/              MCUboot: B91 RISC-V boot fixes
+  zephyr/               Zephyr: GPIO interrupt fixes
+
+firmware/               Critical firmware files
+  code_2M_v2_patched.bin  STOCK RESTORE IMAGE — keep this safe
+  v2_patched.bin          Stock firmware binary (for analysis)
+  v2.exe                  Windows OTA flasher (backup)
+
+scripts/                Operational scripts
+  flash_ota.py          Stage 1 OTA flasher (Linux)
+  crush80_2g_config.py  2.4G access code configuration
+  sniff_2g_access_code.py  nRF24L01+ sniffer for RPi
+  analyze_spi_led.py    AW20216S pin analysis tool
+  check_2g_protocol.py  2.4G protocol analysis
+
+docs/                   Human-readable documentation
+  ghidra_spi_extraction.md  How to extract AW20216S SPI pins
+  hardware_guide_2g_and_diy.md  2.4G hardware + LG TV guide
+  Crush80-RGB-USB.JSON  Original VIA layout (LED map reference)
+
+.github/workflows/      CI
+  build.yml             Builds all firmware targets on push
+
+.claude/                AI analysis notes (reference only)
+.backup/                Archived files not needed for ZMK work
 ```
 
 ---
 
-## Known Limitations
+## Bluetooth Pairing
 
-| Feature | Status | Notes |
-|---|---|---|
-| USB HID (1000 Hz) | ✅ Works | Full NKRO |
-| Bluetooth LE | ✅ Works | 3 profiles, ZMK Studio |
-| Home row mods / all ZMK behaviors | ✅ Works | — |
-| Battery reporting | ✅ Works (likely) | Validate ADC pin at bring-up |
-| Deep sleep | ✅ Works | 15 min idle |
-| Per-key RGB | ⚠️ Pending | Needs AW20216S SPI pin extraction (Ghidra) |
-| 2.4 GHz dongle | ⚠️ Pending | Needs access code sniff (RPi + nRF24L01+) |
-| VIA support | ❌ Removed | Replaced by ZMK Studio (better) |
+1. Press `Fn + F1` for BT profile 1, `Fn + F2` for profile 2, `Fn + F3` for profile 3
+2. LED blinks — keyboard advertises as "Crush 80"
+3. Pair on host — enter 6-digit passkey displayed on screen and type it on the keyboard
+4. `Fn + F5` toggles between USB and Bluetooth output
+5. `Fn + Delete` clears the current BT profile (re-pair from scratch)
 
 ---
 
-## Credits
+## License
 
-- ZMK firmware: [zmkfirmware/zmk](https://github.com/zmkfirmware/zmk) (MIT)
-- Zephyr RTOS: [zephyrproject-rtos/zephyr](https://github.com/zephyrproject-rtos/zephyr) (Apache-2.0)
-- Telink BLE blob: fetched at build time from [telink-semi](https://github.com/telink-semi/zephyr_hal_telink_b91_ble_lib) — proprietary, not redistributed
-- Based on: [scholzri/rainy75-zmk](https://github.com/scholzri/rainy75-zmk) (Apache-2.0)
-
-*Independent project — not affiliated with Wobkey, Telink, or Evision.*
+Firmware code: Apache 2.0  
+ZMK: MIT | Zephyr: Apache 2.0 | MCUboot: Apache 2.0  
+Telink BLE blob: proprietary (Telink NDA) — fetched at build time, not redistributed

@@ -1,0 +1,28 @@
+# Build outputs
+zmk/build/
+zmk/build-mcuboot/
+zmk/build-bridge/
+zmk/artifacts/
+zmk/zmk-src/
+zmk/zephyr/
+zmk/modules/
+zmk/bootloader/
+zmk/lib/liblt_9518_zephyr.a
+
+# BLE blob (proprietary, fetched at build time)
+zmk/lib/*.a
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+
+# Zephyr west workspace
+.west/
+
+# Editor
+.vscode/
+*.swp
+*~
