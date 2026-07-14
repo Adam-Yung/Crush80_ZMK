@@ -1,0 +1,18 @@
+config AW20216S
+	bool "AW20216S LED matrix driver"
+	depends on SPI
+	help
+	  Driver for the AWINIC AW20216S 216-channel SPI LED matrix controller.
+	  Used on the Wobkey Crush 80 for per-key RGB lighting.
+
+if AW20216S
+
+config AW20216S_INIT_PRIORITY
+	int "Init priority"
+	default 90
+
+config AW20216S_LOG_LEVEL
+	int "Log level"
+	default 3
+
+endif # AW20216S

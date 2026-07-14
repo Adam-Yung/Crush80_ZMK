@@ -1,0 +1,30 @@
+# Copyright (c) 2025
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  AW20216S 216-channel SPI LED matrix controller (Wobkey Crush 80).
+
+compatible: "wobkey,aw20216s"
+
+include: [spi-device.yaml]
+
+properties:
+  num-leds:
+    type: int
+    required: true
+    description: Number of logical LEDs driven by this controller.
+
+  global-current:
+    type: int
+    default: 32
+    description: |
+      Global current control register value (0x00-0xFF).
+      Default 32 (0x20) = ~12% of max current — safe starting value.
+      Increase for brighter LEDs; max 0xFF = 100%.
+
+  enable-gpios:
+    type: phandle-array
+    description: |
+      Optional GPIO to enable LED power (active-high MOSFET gate).
+      On the Crush 80, a GPIO drives a MOSFET that powers the AW20216S.
+      UNKNOWN pin — must be extracted from firmware LED init function.

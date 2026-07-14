@@ -1,0 +1,8 @@
+board:
+  name: crush80
+  full_name: Wobkey Crush 80
+  url: https://wobkey.com
+  vendor: wobkey
+  socs:
+    - name: tlsr9518
+  variants: []

@@ -1,0 +1,112 @@
+/*
+ * Wobkey Crush 80 — Default ZMK keymap
+ *
+ * Layer 0: Base QWERTY
+ * Layer 1: Fn layer (media, RGB, BT/USB mode)
+ *
+ * Wireless mode bindings:
+ *   BT profile 1 = Fn+F1, BT profile 2 = Fn+F2, BT profile 3 = Fn+F3
+ *   USB output  = Fn+F4
+ *   BT/USB toggle = Fn+F5
+ *   BT clear current profile = Fn+Delete
+ *
+ * RGB controls (require AW20216S driver — currently disabled):
+ *   Fn+Backspace = RGB toggle
+ *   Fn+Enter     = RGB effect cycle
+ *   Fn+Up        = RGB brightness up
+ *   Fn+Down      = RGB brightness down
+ *
+ * Home row mods: NOT in this default keymap. Add them after basic bring-up
+ * is confirmed. See ZMK docs: https://zmk.dev/docs/keymaps/behaviors/hold-tap
+ */
+
+#include <behaviors.dtsi>
+#include <dt-bindings/zmk/keys.h>
+#include <dt-bindings/zmk/bt.h>
+#include <dt-bindings/zmk/outputs.h>
+#include <dt-bindings/zmk/rgb.h>
+
+/* Fn key momentary layer */
+#define FN_LAYER 1
+
+/ {
+	keymap {
+		compatible = "zmk,keymap";
+
+		/*
+		 * Layer 0: Base QWERTY
+		 * 88 keys matching the matrix transform in crush80.dts.
+		 * Bindings listed in RC(row,col) scan order.
+		 */
+		default_layer {
+			display-name = "Base";
+			bindings = <
+				/* Row 0: function row */
+				&kp ESC   &kp F1    &kp F2    &kp F3    &kp F4
+				&kp F5    &kp F6    &kp F7    &kp F8
+				&kp F9    &kp F10   &kp F11   &kp F12
+				&kp PSCRN &kp SLCK  &kp PAUSE_BREAK
+				/* Row 1: number row + nav */
+				&kp GRAVE &kp N1    &kp N2    &kp N3    &kp N4
+				&kp N5    &kp N6    &kp N7    &kp N8    &kp N9
+				&kp N0    &kp MINUS &kp EQUAL &kp BSPC
+				&kp INS   &kp HOME  &kp PG_UP
+				/* Row 2: QWERTY + nav */
+				&kp TAB   &kp Q     &kp W     &kp E     &kp R
+				&kp T     &kp Y     &kp U     &kp I     &kp O
+				&kp P     &kp LBKT  &kp RBKT  &kp BSLH
+				&kp DEL   &kp END   &kp PG_DN
+				/* Row 3: home row */
+				&kp CAPS  &kp A     &kp S     &kp D     &kp F
+				&kp G     &kp H     &kp J     &kp K     &kp L
+				&kp SEMI  &kp SQT             &kp RET
+				/* Row 4: shift row */
+				&kp LSHFT           &kp Z     &kp X     &kp C
+				&kp V     &kp B     &kp N     &kp M     &kp COMMA
+				&kp DOT   &kp FSLH            &kp RSHFT &kp UP
+				/* Row 5: bottom row */
+				&kp LCTRL &kp LGUI  &kp LALT            &kp SPACE
+				&kp RALT  &mo FN_LAYER &kp RCTRL
+				&kp LEFT  &kp DOWN  &kp RIGHT
+			>;
+		};
+
+		/*
+		 * Layer 1: Fn layer
+		 * &trans = pass-through to layer 0
+		 * Wireless profile switching and RGB controls.
+		 */
+		fn_layer {
+			display-name = "Fn";
+			bindings = <
+				/* Row 0: Fn+F1-F12 = BT profiles, USB, BT toggle */
+				&trans    &bt BT_SEL 0 &bt BT_SEL 1 &bt BT_SEL 2 &out OUT_USB
+				&out OUT_TOG &trans &trans &trans
+				&trans    &trans    &trans    &trans
+				&trans    &trans    &trans
+				/* Row 1: Fn+Backspace = RGB toggle */
+				&trans    &trans    &trans    &trans    &trans
+				&trans    &trans    &trans    &trans    &trans
+				&trans    &trans    &trans    &rgb_ug RGB_TOG
+				&bt BT_CLR &trans  &trans
+				/* Row 2: Fn+\ = RGB effect */
+				&trans    &trans    &trans    &trans    &trans
+				&trans    &trans    &trans    &trans    &trans
+				&trans    &trans    &trans    &rgb_ug RGB_EFF
+				&trans    &trans    &trans
+				/* Row 3: Fn+Enter = RGB effect cycle */
+				&trans    &trans    &trans    &trans    &trans
+				&trans    &trans    &trans    &trans    &trans
+				&trans    &trans              &rgb_ug RGB_EFF
+				/* Row 4: Fn+Up = RGB brightness up */
+				&trans              &trans    &trans    &trans
+				&trans    &trans    &trans    &trans    &trans
+				&trans    &trans              &trans    &rgb_ug RGB_BRI
+				/* Row 5: no special Fn combos on bottom row */
+				&trans    &trans    &trans              &trans
+				&trans    &trans    &trans
+				&trans    &rgb_ug RGB_BRD &trans
+			>;
+		};
+	};
+};
