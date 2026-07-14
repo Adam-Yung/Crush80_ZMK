@@ -1,0 +1,30 @@
+manifest:
+  remotes:
+    - name: zmkfirmware
+      url-base: https://github.com/zmkfirmware
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+
+  projects:
+    # ZMK — pinned to the same commit the Rainy 75 port was validated against.
+    # Bump this together with the patch in patches/zmk-src/ if you upgrade ZMK.
+    - name: zmk
+      remote: zmkfirmware
+      revision: 27afcb11efff6345d0ceb875e85c2de0673123f6
+      path: zmk-src
+      import: app/west.yml
+
+    # Telink HAL — provides B91 Zephyr platform drivers (GPIO, SPI, flash, ADC…)
+    - name: hal_telink
+      remote: zephyrproject-rtos
+      revision: main
+      path: modules/hal/hal_telink
+
+    # MCUboot — bootloader with watchdog crash-revert safety net
+    - name: mcuboot
+      remote: zephyrproject-rtos
+      revision: v2.2.0
+      path: bootloader/mcuboot
+
+  self:
+    path: zmk
