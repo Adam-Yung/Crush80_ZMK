@@ -1,0 +1,3 @@
+config BOARD_CRUSH80
+	select SOC_TLSR9518
+	select HAS_POWEROFF

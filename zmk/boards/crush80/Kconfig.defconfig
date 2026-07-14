@@ -2,7 +2,26 @@
 
 if BOARD_CRUSH80
 
-config BOARD
-	default "crush80"
+config SOC_FLASH_TELINK_B91
+	default y if FLASH
+
+config WDT_B91
+	default y
+	depends on WDT
+
+# Multi-level IRQ fix — identical to Rainy 75 Pro.
+# The B91 PLIC driver selects MULTI_LEVEL_INTERRUPTS + 2ND_LEVEL_INTERRUPTS.
+# Without MAX_IRQ_PER_AGGREGATOR, all PLIC interrupts appear spurious.
+# 2ND_LVL_ISR_TBL_OFFSET=12 separates the PLIC table from level-1 entries
+# (MTIP=7, MEIP=11) so USB_SETUP (source 7) and USB_ENDPOINT (source 11)
+# don't collide with the timer and PLIC handler ISRs.
+config MAX_IRQ_PER_AGGREGATOR
+	default 64
+
+config 2ND_LVL_ISR_TBL_OFFSET
+	default 12
+
+config NUM_IRQS
+	default 76
 
 endif # BOARD_CRUSH80
