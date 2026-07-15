@@ -153,6 +153,13 @@ dist/                 Build outputs (gitignored)
 
 ---
 
+## Acknowledgments
+
+This project is an independent firmware for the Wobkey Crush 80 keyboard.  
+Original community analysis and reference material from [Desz01ate/Wobkey_Crush_80_Patched_Firmware](https://github.com/Desz01ate/Wobkey_Crush_80_Patched_Firmware).
+
+---
+
 ## License
 
 Apache 2.0. Telink BLE blob: proprietary (fetched at build time, not redistributed).
