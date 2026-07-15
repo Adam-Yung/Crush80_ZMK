@@ -1,0 +1,15 @@
+# Python dependencies for Crush 80 ZMK firmware tooling
+# Install with: pip3 install --break-system-packages -r requirements.txt
+
+# Zephyr build tool
+west>=1.5.0
+
+# ELF file parsing (required by west and Zephyr build system)
+pyelftools>=0.29
+
+# Schema validation (used by west)
+pykwalify>=1.8.0
+
+# ZMK Studio / nanopb protobuf code generation (required for ZMK Studio support)
+protobuf
+grpcio-tools

@@ -1,182 +1,152 @@
 #!/bin/bash
-# Build ZMK firmware for Crush 80 Pro
-# Usage: ./build.sh [-p] [-v] [-m] [-c] [-o] [-b] [-a] (--iso | --ansi)
-#   -p  pristine build (clean rebuild)
-#   -v  verbose output
-#   -m  build MCUboot bootloader
-#   -c  create combined flash image (MCUboot + app)
-#   -o  create OTA-ready image (combined + Telink header + CRC32)
-#   -b  build OTA bridge (monolithic, for stock-to-ZMK transition)
-#   -a  all: MCUboot + app + combined + OTA + bridge
-#   --iso / --ansi   physical layout, REQUIRED for any app build (no default)
-#                    e.g. ./build.sh -pa --iso   or   ./build.sh -pa --ansi
+# Build all Wobkey Crush 80 ZMK firmware targets.
+# Run from repo root in WSL: bash build.sh
+#
+# Outputs go to dist/ (gitignored):
+#   dist/crush80-ota-bridge.bin    ← flash first via flash_ota.py
+#   dist/crush80-zmk-app.signed.bin ← flash second via mcumgr
+#   dist/crush80-mcuboot.bin       ← only needed for SWS/hardware recovery
+#
+# Options:
+#   bash build.sh --skip-bridge    skip OTA bridge build (faster rebuild)
+#   bash build.sh --skip-mcuboot   skip MCUboot build
 
-set -e
+set -euo pipefail
 
-cd "$(dirname "$0")"
+REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+SKIP_BRIDGE=false
+SKIP_MCUBOOT=true   # MCUboot: use rainy75-zmk's pre-built copy (same TLSR9511 MCU)
+                    # Build explicitly with: bash build.sh --build-mcuboot
 
-source .venv/bin/activate
-export ZEPHYR_SDK_INSTALL_DIR="$(pwd)/toolchain/zephyr-sdk-0.17.0"
-
-PRISTINE=""
-VERBOSE_CMAKE=""
-BUILD_MCUBOOT=0
-BUILD_COMBINED=0
-BUILD_OTA=0
-BUILD_BRIDGE=0
-BUILD_APP=1
-LAYOUT=""             # "iso" or "ansi" — REQUIRED for app builds, no default
-ANSI_DTFLAG=""        # set when LAYOUT=ansi
-
-# ── Apply upstream patches if needed ──────────────────────────
-apply_patches() {
-    local repo="$1" dir="$2"
-    for patch in "patches/$repo"/*.patch; do
-        [ -f "$patch" ] || continue
-        if git -C "$dir" apply --reverse --check "$PWD/$patch" 2>/dev/null; then
-            continue  # already applied
-        fi
-        echo "Applying patch: $repo/$(basename "$patch")"
-        git -C "$dir" am --3way "$PWD/$patch" || {
-            echo "WARNING: Patch failed — may need manual resolution." >&2
-            git -C "$dir" am --abort 2>/dev/null || true
-        }
-    done
-}
-apply_patches zephyr zephyr
-apply_patches mcuboot bootloader/mcuboot
-apply_patches hal_telink modules/hal/hal_telink
-apply_patches zmk-src zmk-src
-
-# ── Fetch the (non-redistributable) Telink BLE blob if missing ──
-./fetch_ble_blob.sh
-
-# Allow long forms --iso / --ansi as aliases for -I / -A.
-ARGS=(); for a in "$@"; do case "$a" in
-    --iso)  ARGS+=("-I");;
-    --ansi) ARGS+=("-A");;
-    *)      ARGS+=("$a");;
-esac; done
-set -- "${ARGS[@]}"
-
-while getopts "pvmcobaIA" opt; do
-    case $opt in
-        p) PRISTINE="-p" ;;
-        v) VERBOSE_CMAKE="-DCMAKE_VERBOSE_MAKEFILE=ON" ;;
-        m) BUILD_MCUBOOT=1; BUILD_APP=0 ;;
-        c) BUILD_COMBINED=1 ;;
-        o) BUILD_OTA=1 ;;
-        b) BUILD_BRIDGE=1; BUILD_APP=0 ;;
-        a) BUILD_MCUBOOT=1; BUILD_COMBINED=1; BUILD_OTA=1; BUILD_BRIDGE=1; BUILD_APP=1 ;;
-        I) [ "$LAYOUT" = ansi ] && { echo "Error: --iso and --ansi are mutually exclusive" >&2; exit 1; }; LAYOUT="iso" ;;
-        A) [ "$LAYOUT" = iso  ] && { echo "Error: --iso and --ansi are mutually exclusive" >&2; exit 1; }; LAYOUT="ansi"; ANSI_DTFLAG="-DDTS_EXTRA_CPPFLAGS=-Dcrush80_ANSI -DCONFIG_CRUSH80_RGB_ANSI_LEDMAP=y" ;;
-        *) echo "Usage: $0 [-p] [-v] [-m] [-c] [-o] [-b] [-a] (--iso | --ansi)"; exit 1 ;;
+for arg in "$@"; do
+    case $arg in
+        --skip-bridge)    SKIP_BRIDGE=true ;;
+        --skip-mcuboot)   SKIP_MCUBOOT=true ;;
+        --build-mcuboot)  SKIP_MCUBOOT=false ;;
     esac
 done
 
-# The app build needs an explicit physical layout — no silent default (an ANSI
-# owner must not get an ISO build by accident, and vice-versa).
-if [ "$BUILD_APP" -eq 1 ] && [ -z "$LAYOUT" ]; then
-    echo "Error: choose a layout for the app build: --iso or --ansi" >&2
-    echo "  ./build.sh -pa --iso    # ISO DE  (the original board)" >&2
-    echo "  ./build.sh -pa --ansi   # ANSI    (community-verified)" >&2
+# ── Locate west workspace ────────────────────────────────────────────────────
+if [ -f "$REPO_DIR/.workspace_path" ]; then
+    # shellcheck source=/dev/null
+    source "$REPO_DIR/.workspace_path"
+elif [ -d "$HOME/Projects/crush80/rainy75-zmk/.west" ]; then
+    WORKSPACE_DIR="$HOME/Projects/crush80/rainy75-zmk"
+elif [ -d "$HOME/Projects/crush80-workspace/.west" ]; then
+    WORKSPACE_DIR="$HOME/Projects/crush80-workspace"
+else
+    echo "ERROR: West workspace not found. Run: bash setup.sh"
     exit 1
 fi
 
-# ── MCUboot build ──────────────────────────────────────────────
-if [ "$BUILD_MCUBOOT" -eq 1 ]; then
-    echo "=== Building MCUboot ==="
-    west build $PRISTINE -b crush80 -d build-mcuboot \
-        bootloader/mcuboot/boot/zephyr -- \
-        -DEXTRA_CONF_FILE="$(pwd)/conf/mcuboot.conf" \
-        -DEXTRA_DTC_OVERLAY_FILE="$(pwd)/conf/mcuboot.overlay" \
-        "-DDTS_ROOT=$(pwd)/zmk;$(pwd)/zmk-src/app" \
-        "-DZMK_EXTRA_MODULES=$(pwd)/zmk;$(pwd)/zmk-src/app" \
-        $VERBOSE_CMAKE
+export PATH="/usr/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
+export ZEPHYR_SDK_INSTALL_DIR="$HOME/zephyr-sdk-0.17.0"
 
-    SIZE=$(stat -c%s build-mcuboot/zephyr/zephyr.bin)
-    echo "MCUboot binary: $SIZE bytes (max 65536 for 64KB boot partition)"
-    if [ "$SIZE" -gt 65536 ]; then
-        echo "ERROR: MCUboot exceeds 64KB boot partition!" >&2
-        exit 1
-    fi
+echo "Workspace: $WORKSPACE_DIR"
+echo "Repo:      $REPO_DIR"
+
+# ── Sync board files into workspace ──────────────────────────────────────────
+echo ""
+echo "Syncing board files..."
+cp -r "$REPO_DIR/zmk/boards/crush80/"* "$WORKSPACE_DIR/zmk/boards/crush80/"
+cp -r "$REPO_DIR/zmk/drivers/led/"*    "$WORKSPACE_DIR/zmk/drivers/led/"
+cp -r "$REPO_DIR/zmk/dts/bindings/led/"* "$WORKSPACE_DIR/zmk/dts/bindings/led/"
+echo "  Done."
+
+cd "$WORKSPACE_DIR"
+
+CONF="$REPO_DIR/conf/app.conf"
+OVERLAY="$WORKSPACE_DIR/conf/mcumgr.overlay"
+
+# Crush 80 specific overrides:
+#   - Rename from "Rainy 75 Pro" to "Crush 80"
+#   - Disable Rainy 75 WS2812 RGB engine (Crush 80 uses AW20216S via HSPI)
+#   - Disable PSPI/WS2812 LED strip driver (not on Crush 80)
+OVERRIDE_CONF="$(mktemp /tmp/crush80_override.XXXXXX.conf)"
+cat > "$OVERRIDE_CONF" << 'EOF'
+CONFIG_ZMK_KEYBOARD_NAME="Crush 80"
+CONFIG_RAINY_RGB=n
+CONFIG_LED_STRIP_B91_SPI=n
+EOF
+
+# ── MCUboot ──────────────────────────────────────────────────────────────────
+if [ "$SKIP_MCUBOOT" = false ]; then
+    echo ""
+    echo "[1/3] Building MCUboot..."
+    west build \
+        -s bootloader/mcuboot/boot/zephyr \
+        -b crush80 \
+        -d build-mcuboot \
+        --pristine \
+        -- \
+        -DEXTRA_CONF_FILE="$WORKSPACE_DIR/conf/mcuboot.conf" \
+        -DDTC_OVERLAY_FILE="$WORKSPACE_DIR/conf/mcuboot.overlay" \
+        -DBOARD_ROOT="$WORKSPACE_DIR/zmk"
+    echo "  MCUboot: OK"
 fi
 
-# ── App build ──────────────────────────────────────────────────
-if [ "$BUILD_APP" -eq 1 ]; then
-    echo "=== Building ZMK app (${LAYOUT^^} layout) ==="
-    west build $PRISTINE -b crush80 zmk-src/app -- \
-        -DZMK_CONFIG="$(pwd)/zmk/boards/crush80" \
-        -DZMK_EXTRA_MODULES="$(pwd)/zmk" \
-        -DEXTRA_CONF_FILE="$(pwd)/conf/app.conf" \
-        -DEXTRA_DTC_OVERLAY_FILE="$(pwd)/zmk/boards/crush80/crush80.keymap;$(pwd)/conf/mcumgr.overlay" \
-        $ANSI_DTFLAG \
-        $VERBOSE_CMAKE
+# ── OTA bridge ───────────────────────────────────────────────────────────────
+if [ "$SKIP_BRIDGE" = false ]; then
+    echo ""
+    echo "[2/3] Building OTA bridge..."
+    # Bridge uses only ota-bridge.conf — NOT app.conf (which enables MCUboot)
+    BRIDGE_OVERRIDE="$(mktemp /tmp/crush80_bridge.XXXXXX.conf)"
+    printf 'CONFIG_ZMK_KEYBOARD_NAME="Crush 80 Bridge"\nCONFIG_RAINY_RGB=n\nCONFIG_LED_STRIP_B91_SPI=n\n' > "$BRIDGE_OVERRIDE"
+    west build \
+        -s zmk-src/app \
+        -b crush80 \
+        -d build-bridge \
+        --pristine \
+        -- \
+        -DEXTRA_CONF_FILE="$WORKSPACE_DIR/conf/ota-bridge.conf;$BRIDGE_OVERRIDE" \
+        -DDTC_OVERLAY_FILE="$OVERLAY" \
+        -DBOARD_ROOT="$WORKSPACE_DIR/zmk"
+    rm -f "$BRIDGE_OVERRIDE"
+    echo "  OTA bridge: OK"
 fi
 
-# ── Combined image ─────────────────────────────────────────────
-if [ "$BUILD_COMBINED" -eq 1 ]; then
-    echo "=== Creating combined flash image ==="
-    if [ ! -f build-mcuboot/zephyr/zephyr.bin ]; then
-        echo "ERROR: MCUboot binary not found. Build with -m first." >&2
-        exit 1
-    fi
-    if [ ! -f build/zephyr/zmk.signed.bin ]; then
-        echo "ERROR: Signed app binary not found. Build app first." >&2
-        exit 1
-    fi
+# ── ZMK application ──────────────────────────────────────────────────────────
+echo ""
+echo "[3/3] Building ZMK application..."
+west build \
+    -s zmk-src/app \
+    -b crush80 \
+    -d build-crush80 \
+    --pristine \
+    -- \
+    -DEXTRA_CONF_FILE="$CONF;$OVERRIDE_CONF" \
+    -DDTC_OVERLAY_FILE="$OVERLAY" \
+    -DBOARD_ROOT="$WORKSPACE_DIR/zmk"
+echo "  ZMK app: OK"
 
-    python3 -c "
-mcuboot = open('build-mcuboot/zephyr/zephyr.bin','rb').read()
-app = open('build/zephyr/zmk.signed.bin','rb').read()
-pad = 0x10000 - len(mcuboot)  # 64KB boot partition
-assert pad > 0, f'MCUboot too large: {len(mcuboot)} bytes'
-combined = mcuboot + (b'\xff' * pad) + app
-open('build/combined.bin','wb').write(combined)
-print(f'MCUboot:  {len(mcuboot):,} bytes')
-print(f'App:      {len(app):,} bytes (at offset 0x10000)')
-print(f'Combined: {len(combined):,} bytes')
-"
-    echo "Output: build/combined.bin"
+rm -f "$OVERRIDE_CONF"
+
+# ── Collect artifacts into dist/ ─────────────────────────────────────────────
+echo ""
+echo "Collecting artifacts to dist/..."
+DIST="$WORKSPACE_DIR/dist"
+mkdir -p "$DIST"
+
+[ "$SKIP_BRIDGE"   = false ] && \
+    cp "build-bridge/zephyr/zmk.bin"         "$DIST/crush80-ota-bridge.bin"
+cp     "build-crush80/zephyr/zmk.signed.bin" "$DIST/crush80-zmk-app.signed.bin"
+cp     "build-crush80/zephyr/zmk.bin"        "$DIST/crush80-zmk-app.bin"
+if [ "$SKIP_MCUBOOT" = false ]; then
+    cp "build-mcuboot/zephyr/zephyr.bin" "$DIST/crush80-mcuboot.bin"
+elif [ -f "build-mcuboot/zephyr/zephyr.bin" ]; then
+    cp "build-mcuboot/zephyr/zephyr.bin" "$DIST/crush80-mcuboot.bin"
 fi
 
-# ── OTA image ─────────────────────────────────────────────────
-if [ "$BUILD_OTA" -eq 1 ]; then
-    echo "=== Creating OTA-ready image ==="
-    if [ ! -f build/combined.bin ]; then
-        echo "ERROR: Combined image not found. Build with -c first." >&2
-        exit 1
-    fi
+# Also copy to repo dist/ for easy Windows access
+mkdir -p "$REPO_DIR/dist"
+cp "$DIST"/*.bin "$REPO_DIR/dist/" 2>/dev/null || true
 
-    python3 reverse/tools/prepare_ota.py build/combined.bin -o build/combined_ota.bin
-fi
-
-# ── Bridge build (monolithic, no MCUboot) ─────────────────────
-if [ "$BUILD_BRIDGE" -eq 1 ]; then
-    echo "=== Building OTA bridge ==="
-    west build $PRISTINE -b crush80 -d build-bridge zmk-src/app -- \
-        -DZMK_CONFIG="$(pwd)/zmk/boards/crush80" \
-        -DZMK_EXTRA_MODULES="$(pwd)/zmk" \
-        -DEXTRA_CONF_FILE="$(pwd)/conf/ota-bridge.conf" \
-        -DEXTRA_DTC_OVERLAY_FILE="$(pwd)/zmk/boards/crush80/crush80.keymap;$(pwd)/conf/mcumgr.overlay" \
-        $VERBOSE_CMAKE
-
-    if [ ! -f build-bridge/zephyr/zmk.bin ]; then
-        echo "ERROR: Bridge binary not found after build." >&2
-        exit 1
-    fi
-
-    SIZE=$(stat -c%s build-bridge/zephyr/zmk.bin)
-    echo "Bridge binary: $SIZE bytes"
-
-    # Safety: bridge + ZMK combined must both fit below calibration (0xFE000)
-    if [ "$SIZE" -gt 262144 ]; then
-        echo "ERROR: Bridge exceeds 256KB — too large for bank 1!" >&2
-        exit 1
-    fi
-
-    echo "=== Creating bridge OTA image ==="
-    python3 reverse/tools/prepare_ota.py build-bridge/zephyr/zmk.bin \
-        -o build-bridge/bridge_ota.bin
-    echo "Output: build-bridge/bridge_ota.bin"
-fi
+echo ""
+echo "=============================================="
+echo "  Build complete!"
+echo ""
+echo "  dist/crush80-ota-bridge.bin      ← flash first"
+echo "  dist/crush80-zmk-app.signed.bin  ← flash second"
+echo ""
+echo "  Next: bash flash.sh"
+echo "=============================================="
