@@ -349,3 +349,75 @@ static int aw20216s_init(const struct device *dev)
 			      NULL);
 
 DT_INST_FOREACH_STATUS_OKAY(AW20216S_INIT)
+
+/* -----------------------------------------------------------------------
+ * Channel scan mode — compile with CONFIG_AW20216S_CHANNEL_SCAN=y
+ * See docs/rgb_channel_map_bringup.md for full procedure.
+ * ---------------------------------------------------------------------- */
+#ifdef CONFIG_AW20216S_CHANNEL_SCAN
+
+#define SCAN_DWELL_MS 400
+
+static void aw20216s_scan_thread(void *p1, void *p2, void *p3)
+{
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	const struct device *dev0 = DEVICE_DT_GET(DT_NODELABEL(aw20216s0));
+	const struct device *dev1 = DEVICE_DT_GET(DT_NODELABEL(aw20216s1));
+
+	if (!device_is_ready(dev0) || !device_is_ready(dev1)) {
+		LOG_ERR("AW20216S scan: device not ready");
+		return;
+	}
+
+	/* Wait for USB serial to connect */
+	k_sleep(K_SECONDS(3));
+
+	printk("\n=== AW20216S CHANNEL SCAN ===\n");
+	printk("CHIP  SW  CS  PWM_ADDR\n");
+	printk("Note which physical key lights up at each line.\n\n");
+
+	const struct device *chips[2] = {dev0, dev1};
+
+	for (int chip = 0; chip < 2; chip++) {
+		const struct device *dev = chips[chip];
+		struct aw20216s_data *data = dev->data;
+
+		for (int sw = 0; sw < 9; sw++) {
+			for (int cs = 0; cs < 24; cs++) {
+				uint16_t addr = sw * 24 + cs;
+
+				/* All off */
+				aw20216s_set_all_rgb(dev0, 0, 0, 0);
+				aw20216s_set_all_rgb(dev1, 0, 0, 0);
+				aw20216s_update(dev0);
+				aw20216s_update(dev1);
+
+				/* Light this single channel full white */
+				if (addr < AW20216S_PWM_CHANNELS) {
+					data->pwm_buf[addr] = 255;
+					data->dirty = true;
+					aw20216s_update(dev);
+				}
+
+				printk("%d     %d   %02d  0x%02X\n",
+				       chip, sw, cs, addr);
+
+				k_sleep(K_MSEC(SCAN_DWELL_MS));
+			}
+		}
+	}
+
+	printk("\n=== SCAN COMPLETE ===\n");
+	while (1) {
+		k_sleep(K_SECONDS(60));
+	}
+}
+
+K_THREAD_DEFINE(aw20216s_scan_tid, 1024, aw20216s_scan_thread,
+		NULL, NULL, NULL, K_PRIO_PREEMPT(9), 0, 0);
+
+#endif /* CONFIG_AW20216S_CHANNEL_SCAN */
+

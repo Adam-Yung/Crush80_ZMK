@@ -15,4 +15,12 @@ config AW20216S_LOG_LEVEL
 	int "Log level"
 	default 3
 
+config AW20216S_CHANNEL_SCAN
+	bool "AW20216S channel scan mode (bring-up only)"
+	help
+	  Replaces normal RGB with a sequential scanner that lights each
+	  (chip, sw_row, cs_col) for 400ms and prints the address over serial.
+	  Use during bring-up to build the led_sw/led_cs channel map tables.
+	  Must be disabled for production builds.
+
 endif # AW20216S
