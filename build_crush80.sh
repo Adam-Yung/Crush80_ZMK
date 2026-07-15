@@ -30,7 +30,7 @@ OVERLAY=/home/adyung/Projects/crush80/rainy75-zmk/conf/mcumgr.overlay
 # NOTE: ZMK_STUDIO requires protobuf-compiler.
 #   Install with: sudo apt-get install -y protobuf-compiler
 #   Then remove the CONFIG_ZMK_STUDIO=n line below.
-printf 'CONFIG_ZMK_KEYBOARD_NAME="Crush 80"\nCONFIG_RAINY_RGB=n\nCONFIG_LED_STRIP_B91_SPI=n\n' > /tmp/crush80_name.conf
+printf 'CONFIG_ZMK_KEYBOARD_NAME="Crush 80"\nCONFIG_ZMK_STUDIO=n\nCONFIG_RAINY_RGB=n\nCONFIG_LED_STRIP_B91_SPI=n\n' > /tmp/crush80_name.conf
 
 west build -s zmk-src/app -b crush80 -d build-crush80 --pristine \
   -- \
