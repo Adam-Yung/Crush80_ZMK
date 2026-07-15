@@ -1,23 +1,19 @@
 /*
  * AW20216S LED Matrix Controller — Zephyr Driver
- * Wobkey Crush 80 — 154 per-key LEDs
+ * Wobkey Crush 80 — 154 per-key LEDs across 2× AW20216S chips
  *
- * The AW20216S drives up to 216 individual LED channels over SPI.
- * Protocol: write 0xFD (page select), then page number, then registers.
- *   Page 0 (GCR): global config — enable, global current, sync mode
- *   Page 1 (PWM): 8-bit PWM per channel (0x00-0xD7 = channels 1-216)
- *   Page 2 (LED scaling): per-channel current scaling
+ * CONFIRMED from firmware analysis of FUN_ram_0000f2b4 (LED init):
+ *   Hardware: GSPI peripheral (0x80140A00 registers)
+ *   PE0 = CS chip 0 (GPIO active-low)
+ *   PE1 = CLK (GSPI alternate function)
+ *   PE2 = MOSI (GSPI alternate function)
+ *   PC0 = CS chip 1 (GPIO active-low)
+ *   PC2 = LED power MOSFET gate (active-high, same as Rainy 75)
  *
- * Confirmed: 0xFD 0x00 (page select) appears at 3 locations in Crush 80
- * firmware binary (offsets 0x046CE, 0x046E2, 0x046F6).
- *
- * SPI pins: UNKNOWN — DTS stub uses placeholder. Run Ghidra against
- * v2_patched.bin LED init at ~0xEF88 with RISCV:LE:32:AndeStar_v5 processor
- * to find the actual CS/CLK/MOSI pins, then update crush80.dts.
- *
- * LED index order: from firmware offset 0x1C260 (91-entry matrix→LED table).
- * Full 154-LED order must be validated at bring-up by driving LEDs 0,1,2...
- * and observing which physical key lights up.
+ * 154 LEDs × 3 channels = 462 PWM channels total.
+ * AW20216S max = 216 channels (9 rows × 24 cols).
+ * Two chips required: chip 0 handles ~108 channels, chip 1 handles ~46+ channels.
+ * Channel mapping: validated at bring-up by lighting LED 0,1,2... in sequence.
  *
  * Copyright (c) 2025 — Apache 2.0
  */

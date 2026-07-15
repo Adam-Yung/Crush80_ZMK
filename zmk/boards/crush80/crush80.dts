@@ -49,8 +49,9 @@
 		zmk,battery = &battery;
 		zmk,kscan = &kscan0;
 		zmk,physical-layout = &crush80_layout;
-		/* zmk,underglow intentionally absent — Crush 80 uses AW20216S, not WS2812.
-		 * RGB will be added after the AW20216S Zephyr driver is implemented. */
+		/* LED controllers: aw20216s0 and aw20216s1 (2x AW20216S via GSPI).
+		 * zmk,underglow not set here — crush80_rgb.c addresses both chips directly.
+		 * Pins confirmed: PE0=CS0, PE1=CLK, PE2=MOSI, PC0=CS1, PC2=power */
 	};
 
 	bt_hci: bt_hci {
@@ -334,8 +335,59 @@
 	};
 };
 
+/*
+ * AW20216S LED matrix controller — CONFIRMED from firmware analysis
+ * of FUN_ram_0000f2b4 (LED init at 0xF2B4).
+ *
+ * Hardware SPI (GSPI peripheral, 0x80140A00 register base):
+ *   PE0 = GSPI CS#   (chip select, active-low)  [CONFIRMED]
+ *   PE1 = GSPI CLK   (clock)                    [CONFIRMED]
+ *   PE2 = GSPI MOSI  (data out)                 [CONFIRMED]
+ *   PC2 = LED power MOSFET gate (active-high)   [CONFIRMED same as Rainy 75]
+ *
+ * 154 LEDs requires 2× AW20216S chips (max 216 channels each = 72 LEDs each at 3 ch/LED).
+ * Second CS pin: PC0 is configured as output in firmware alongside PE0.
+ * Channel mapping per chip: to be validated at bring-up by lighting individual LEDs.
+ *
+ * GSPI peripheral control registers: 0x80140A02 = 0x45 (mode/speed), confirmed.
+ */
+&spi_gspi {
+	status = "okay";
+	pinctrl-0 = <&gspi_default>;
+	pinctrl-names = "default";
+	cs-gpios = <&gpioe 0 GPIO_ACTIVE_LOW>,   /* PE0 = CS chip 0 — CONFIRMED */
+	           <&gpioc 0 GPIO_ACTIVE_LOW>;   /* PC0 = CS chip 1 — CONFIRMED */
+
+	aw20216s0: aw20216s@0 {
+		compatible = "wobkey,aw20216s";
+		reg = <0>;
+		spi-max-frequency = <1000000>;
+		num-leds = <108>;          /* chip 0: LEDs 0-107 (rows 0-4, 6+12+6+6 col mapping TBD) */
+		global-current = <32>;     /* 0x20 = ~12% — safe starting value */
+		enable-gpios = <&gpioc 2 GPIO_ACTIVE_HIGH>;  /* PC2 = LED power — CONFIRMED */
+		status = "okay";
+	};
+
+	aw20216s1: aw20216s@1 {
+		compatible = "wobkey,aw20216s";
+		reg = <1>;
+		spi-max-frequency = <1000000>;
+		num-leds = <46>;           /* chip 1: LEDs 108-153 */
+		global-current = <32>;
+		status = "okay";
+	};
+};
+
+/* GSPI pin mux: PE0=CS, PE1=CLK, PE2=MOSI (alternate function on GSPI peripheral) */
 &pinctrl {
 	pad-mul-sel = <1>;
+	gspi_default: gspi_default {
+		group1 {
+			psels = <NRF_PSEL(GSPI_CLK,  4, 1)>,  /* PE1 */
+			        <NRF_PSEL(GSPI_MOSI, 4, 2)>;  /* PE2 */
+			/* PE0 used as manual CS GPIO, not SPI peripheral CS */
+		};
+	};
 };
 
 &gpioa { status = "okay"; };
