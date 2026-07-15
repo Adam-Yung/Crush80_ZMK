@@ -1,198 +1,134 @@
 # Crush 80 ZMK Firmware — Implementation Plan
 
 **Legend:**
-- ✅ **DONE** — complete, committed, ready to use
-- ⏳ **IN PROGRESS** — user is working on this now
-- ⚠️ **BLOCKED** — needs specific information or hardware before it can proceed
-- 📋 **TODO** — unblocked, can be done next
+- ✅ **DONE** — complete, committed, validated
+- ⏳ **NEXT** — unblocked, can be done immediately
+- ⚠️ **NEEDS HARDWARE** — blocked on physical action (flash/probe)
+- 📋 **OPTIONAL** — nice to have, not required for working keyboard
 
 ---
 
-## Phase 1: Core Firmware (USB + BLE) — No Blockers
+## Phase 1: Core Firmware (USB + BLE) ✅ COMPLETE
 
-Everything needed to get USB HID and Bluetooth working is already written.
-The only remaining step is getting the toolchain installed and running the build.
+Everything for USB HID + BLE is written and built.
 
-### ✅ Hardware confirmed
-
-| Fact | Evidence |
-|------|----------|
-| MCU: TLSR9511 | USB descriptor string at `firmware/v2_patched.bin:0x1DB20` |
-| LED: AW20216S (SPI) | `0xFD 0x00` page-select command found 3× in firmware |
-| Matrix: 6×16 | `v2_update.md`: "Same 16x6 scan routine, same pin assignments" |
-| GPIO assignments | Copied from Rainy 75 Pro; `v2_update.md` confirms "same pin assignments" |
-
-### ✅ Board definition written
-
-| File | Status |
+| Item | Status |
 |------|--------|
-| `zmk/boards/crush80/crush80.dts` | Complete. GPIO = Rainy 75 (likely correct). |
-| `zmk/boards/crush80/crush80.keymap` | Complete. QWERTY + Fn layer. |
-| `zmk/boards/crush80/crush80_defconfig` | Complete. |
-| `zmk/boards/crush80/Kconfig.*` | Complete. |
-| `zmk/boards/crush80/board.yml` | Complete. |
-| `conf/app.conf` | Complete. |
-| `zmk/west.yml` | Complete. Pinned to validated ZMK revision. |
-| `.github/workflows/build.yml` | Complete. Builds and uploads artifacts on push. |
+| MCU confirmed: TLSR9511 | ✅ USB descriptor string |
+| Matrix GPIO: same as Rainy 75 | ✅ v2_update.md confirmed |
+| Board DTS, keymap, Kconfig | ✅ All written |
+| AW20216S SPI pins confirmed | ✅ PE0=CS0, PE1=CLK, PE2=MOSI, PC0=CS1, PC2=power |
+| DTS with correct &hspi node | ✅ Pinctrl for PE1/PE2 FUNC_C |
+| Successful ZMK build (417/417) | ✅ zmk.bin 280KB |
+| AW20216S Zephyr driver | ✅ Written (2-chip, HSPI) |
+| RGB engine (solid + echo) | ✅ Written |
+| 2.4G sniffer script | ✅ Written |
+| OTA flash path documented | ✅ README.md Part 3 |
+| Stock restore documented | ✅ README.md Part 4 |
 
-### ⏳ Toolchain setup (user running now)
-
-```bash
-# In WSL Ubuntu 24.04 — run these sequentially:
-sudo apt-get update && sudo apt-get install -y git cmake ninja-build python3-pip wget xz-utils libusb-1.0-0-dev file
-pip3 install west pyelftools
-
-# Zephyr SDK 0.17.0 (exact version required):
-cd ~
-wget https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v0.17.0/zephyr-sdk-0.17.0_linux-x86_64.tar.xz
-tar xf zephyr-sdk-0.17.0_linux-x86_64.tar.xz
-cd zephyr-sdk-0.17.0 && ./setup.sh -t riscv64-zephyr-elf
-```
-
-### 📋 TODO: west init + build + flash
+### ⏳ NEXT: Build + Flash
 
 ```bash
-# In crush80 repo root:
-cd zmk
-west init -l .
-west update              # 5-10 min
-cd ..
-bash fetch_ble_blob.sh
-pip3 install -r zmk/zephyr/scripts/requirements.txt
+# In WSL, from /home/adyung/Projects/crush80/rainy75-zmk:
 
-# Build:
-export ZEPHYR_SDK_INSTALL_DIR=~/zephyr-sdk-0.17.0
-bash build.sh -a
+# 1. Install protobuf (enables ZMK Studio — do this once with sudo):
+sudo apt-get install -y protobuf-compiler
 
-# Flash Stage 1 (OTA bridge):
-python3 scripts/flash_ota.py zmk/build-bridge/zephyr/zmk.bin
+# 2. Sync updated board files from Windows repo:
+cp -r /mnt/c/Users/adyung/Documents/Adam/Wobkey_Crush_80_Patched_Firmware/zmk/boards/crush80/* \
+      /home/adyung/Projects/crush80/rainy75-zmk/zmk/boards/crush80/
 
-# Flash Stage 2 (ZMK app via mcumgr):
+# 3. Rebuild (remove ZMK_STUDIO=n override now that protoc is installed):
+/bin/bash /mnt/c/Users/adyung/Documents/Adam/Wobkey_Crush_80_Patched_Firmware/build_crush80.sh
+
+# 4. Flash OTA bridge (Stage 1):
+python3 /mnt/c/Users/adyung/Documents/Adam/Wobkey_Crush_80_Patched_Firmware/scripts/flash_ota.py \
+    /home/adyung/Projects/crush80/rainy75-zmk/build-bridge/zephyr/zmk.bin
+
+# 5. Flash ZMK app (Stage 2 — after bridge enumerates as /dev/ttyACM0):
 ~/go/bin/mcumgr --conntype serial --connstring "dev=/dev/ttyACM0,baud=115200" \
-    image upload zmk/build/zephyr/zmk.signed.bin
-~/go/bin/mcumgr --conntype serial --connstring "dev=/dev/ttyACM0,baud=115200" \
-    image confirm && reset
-```
-
-### 📋 TODO: Bring-up validation
-
-After first boot, validate in this order:
-
-1. **USB HID** — plug in, open notepad, press keys. Characters appear.
-2. **Key matrix** — if any key produces wrong output:
-   - Add `CONFIG_ZMK_KSCAN_LOG_LEVEL_DBG=y` to `conf/app.conf`
-   - Read serial console: `screen /dev/ttyACM0 115200`
-   - Press known key (ESC → should log `RC(0,0)`)
-   - If row/col are wrong, swap the `col-gpios`/`row-gpios` entries in `crush80.dts`
-3. **Bluetooth** — `Fn+F1` to enter BT pairing, pair from host, type text over BLE
-4. **Battery** — BLE battery service should show a percentage
-
----
-
-## Phase 2: Per-Key RGB
-
-### ⚠️ BLOCKED: AW20216S SPI pin extraction
-
-**What's needed:** The CS, CLK, and MOSI GPIO pins used by the AW20216S chip.
-These are not in any public documentation and must be extracted from the stock firmware.
-
-**How to unblock:** Follow `docs/ghidra_spi_extraction.md` — takes ~1-2 hours.
-
-**What's already written (waiting on pins):**
-- `zmk/drivers/led/aw20216s.c` — full SPI driver, page register protocol ✅
-- `zmk/drivers/led/crush80_rgb.c` — RGB engine, SOLID + ECHO effects ✅
-- `zmk/dts/bindings/led/wobkey,aw20216s.yaml` — DTS binding ✅
-
-### 📋 TODO: After extracting pins
-
-1. Find the 3 GPIO pins from Ghidra analysis of LED init at ~`0xEF88`
-2. Add AW20216S SPI node to `crush80.dts` with actual pins:
-   ```dts
-   &spi_gspi {                              // actual SPI peripheral name TBD
-       aw20216s0: aw20216s@0 {
-           compatible = "wobkey,aw20216s";
-           reg = <0>;
-           cs-gpios = <&gpioc 0 GPIO_ACTIVE_LOW>; // ← fill in actual CS pin
-           num-leds = <154>;
-           global-current = <32>;
-       };
-   };
-   ```
-3. Rebuild and flash
-4. At bring-up: drive LED 0 solid blue, press keys — verify echo effect fires
-5. If LED ordering is wrong: update `crush80_led_sw[]`/`crush80_led_cs[]` tables in `aw20216s.c`
-
----
-
-## Phase 3: 2.4 GHz Dongle
-
-### ⚠️ BLOCKED: nRF24L01+ hardware + access code sniff
-
-**What's needed:**
-1. nRF24L01+ PA+LNA module (~$12, pack of 4 on Amazon)
-2. One sniffing session with keyboard in 2.4G mode + Raspberry Pi 3B
-
-**What's already written (waiting on access code):**
-- `scripts/sniff_2g_access_code.py` — RPi + nRF24 sniffer script ✅
-- `scripts/crush80_2g_config.py` — config generator (edit 2 lines, run, done) ✅
-- `zmk/drivers/radio/crush80_2g_constants.h` — placeholder header (auto-generated) ✅
-- RF physical layer: open-source Apache 2.0 in `tl_platform_sdk` ✅
-- TPLL state machine: ~300 lines to write once access code known 📋
-
-### 📋 TODO: After sniffing
-
-1. Wire nRF24L01+ to RPi 3B (7 Dupont wires, see `docs/hardware_guide_2g_and_diy.md`)
-2. `pip3 install pyrf24` on RPi
-3. `python3 scripts/sniff_2g_access_code.py` — switch keyboard to 2.4G, press keys
-4. Note the `ACCESS CODE` and `CHANNELS` printed
-5. Edit `scripts/crush80_2g_config.py` (2 lines)
-6. Run `python3 scripts/crush80_2g_config.py` to regenerate header
-7. Write `zmk/drivers/radio/b91_tpll.c` TPLL state machine (~300 lines)
-8. Rebuild and flash
-
----
-
-## Recovery Procedures
-
-### Standard update (MCUboot installed)
-
-```bash
-bash build.sh
-~/go/bin/mcumgr --conntype serial --connstring "dev=/dev/ttyACM0,baud=115200" \
-    image upload zmk/build/zephyr/zmk.signed.bin
+    image upload /home/adyung/Projects/crush80/rainy75-zmk/build-crush80/zephyr/zmk.signed.bin
 ~/go/bin/mcumgr ... image confirm && reset
 ```
 
-### Revert to stock firmware
+### ⚠️ After first flash: Validate key matrix
 
-```bash
-bash restore_stock.sh -y
-# or manually:
-python3 scripts/flash_ota.py firmware/code_2M_v2_patched.bin
-```
-
-### Auto-revert (MCUboot watchdog)
-
-If the ZMK app crashes on boot, MCUboot's watchdog automatically reverts to the previous
-image within ~30 seconds. No action needed — just wait.
-
-### Hard recovery (Telink Burning Board via SWS)
-
-Only needed if both the app and OTA bridge are wiped:
-1. Open keyboard case (ball-catch, no tools)
-2. Wire Burning Board to 3 SWS pads: GND, VCC, SWS
-3. BDT tool → B91 → `firmware/code_2M_v2_patched.bin` → Flash
+Enable debug logging, press ESC (expect RC(0,0)), press A (expect RC(3,1)). If wrong, swap GPIO entries in `crush80.dts`. See README.md for full procedure.
 
 ---
 
-## Outstanding Items Summary
+## Phase 2: RGB (AW20216S) — Hardware confirmed, needs bring-up
 
-| Item | Blocker | Effort |
-|------|---------|--------|
-| ⏳ Toolchain installed | None (user running apt/pip) | 20 min |
-| ⏳ `west update` + BLE blob | Toolchain done first | 10 min |
-| 📋 First build + flash | Toolchain done | 15 min |
-| 📋 GPIO matrix validation | First flash done | 30 min bring-up |
-| ⚠️ AW20216S SPI pins | Ghidra + firmware analysis | 1-2 hours |
-| ⚠️ 2.4G access code | nRF24L01+ hardware ($12) | 30 min once hardware arrives |
-| 📋 TPLL driver (~300 LOC) | Access code known | 2-3 hours coding |
+### What's done ✅
+- SPI pins confirmed from Ghidra: PE0/PE1/PE2/PC0/PC2
+- DTS with correct `&hspi` node and pinctrl
+- Full AW20216S Zephyr driver written (2-chip, HSPI)
+- RGB engine with SOLID + ECHO effects
+- DTS binding written
+
+### ⏳ NEXT: Enable in build, then validate channel map
+
+```bash
+# In build_crush80.sh, remove these lines from the override:
+# CONFIG_RAINY_RGB=n
+# CONFIG_LED_STRIP_B91_SPI=n
+# And add: CONFIG_AW20216S=y
+
+# Then rebuild and flash.
+```
+
+**Channel map bring-up** (30 min with keyboard flashed):
+
+The AW20216S has 216 channels (9 rows SW × 24 cols CS). Each LED needs 3 channels (R,G,B). The `crush80_led_sw[]` and `crush80_led_cs[]` tables in `aw20216s.c` are placeholders.
+
+Procedure: add a test mode that lights LED 0, then 1, then 2... Record which physical key lights up for each index. The firmware's LED index table at offset `0x1C260` in `v2_patched.bin` gives the stock ordering as a reference.
+
+---
+
+## Phase 3: 2.4 GHz Dongle — Needs hardware
+
+### ⚠️ Needs: nRF24L01+ PA+LNA modules (~$12, 4-pack on Amazon)
+
+Once you have them:
+1. Wire to RPi 3B (7 Dupont wires — see `docs/hardware_guide_2g_and_diy.md`)
+2. `pip3 install pyrf24` on RPi
+3. `python3 scripts/sniff_2g_access_code.py` — keyboard in 2.4G mode, press keys
+4. Get `ACCESS_CODE` and `CHANNELS` output
+5. Edit 2 lines in `scripts/crush80_2g_config.py`
+6. Run `python3 scripts/crush80_2g_config.py` → regenerates header
+7. Write TPLL driver (~300 lines C, template provided in plan)
+
+### 📋 OPTIONAL: Also needs dongle-side firmware
+
+The existing Wobkey dongle runs proprietary firmware. Re-flashing it requires SWS access (opening the dongle). An alternative: source a compatible Telink dongle dev board that can run open TPLL firmware.
+
+---
+
+## What's strictly necessary vs optional
+
+### STRICTLY NECESSARY (for working keyboard)
+1. `sudo apt install protobuf-compiler` — 1 command
+2. Sync updated board files to WSL workspace
+3. Rebuild firmware (removes stub overrides)
+4. Flash OTA bridge + ZMK app via mcumgr
+5. Validate matrix GPIO with debug log
+
+### NEEDED FOR RGB
+6. Enable `CONFIG_AW20216S=y` in build
+7. Channel map validation at bring-up (30 min, no hardware needed beyond keyboard)
+
+### OPTIONAL (nice, not required)
+- 2.4G dongle: nRF24 hardware + sniff session
+- ZMK Studio: just needs `sudo apt install protobuf-compiler`
+- Home row mods: pure keymap change, no firmware rebuild needed
+
+---
+
+## Recovery cheatsheet
+
+| Situation | Fix |
+|-----------|-----|
+| ZMK app crashes | MCUboot WDT reverts automatically in ~30s |
+| Want stock back | `bash restore_stock.sh -y` |
+| Manual stock restore | `python3 scripts/flash_ota.py firmware/code_2M_v2_patched.bin` |
+| Total brick | Telink Burning Board + SWS pads (see `docs/ghidra_spi_extraction.md`) |

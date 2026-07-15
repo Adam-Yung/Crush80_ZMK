@@ -6,6 +6,7 @@
 #include <dt-bindings/zmk/matrix_transform.h>
 #include <dt-bindings/led/led.h>
 #include <physical_layouts.dtsi>
+#include <zephyr/dt-bindings/pinctrl/b91-pinctrl.h>
 
 /*
  * Wobkey Crush 80 — DTS board definition
@@ -336,35 +337,53 @@
 };
 
 /*
- * AW20216S LED matrix controller — CONFIRMED from firmware analysis
- * of FUN_ram_0000f2b4 (LED init at 0xF2B4).
+ * AW20216S LED matrix controllers via B91 HSPI hardware SPI
  *
- * Hardware SPI (GSPI peripheral, 0x80140A00 register base):
- *   PE0 = GSPI CS#   (chip select, active-low)  [CONFIRMED]
- *   PE1 = GSPI CLK   (clock)                    [CONFIRMED]
- *   PE2 = GSPI MOSI  (data out)                 [CONFIRMED]
- *   PC2 = LED power MOSFET gate (active-high)   [CONFIRMED same as Rainy 75]
+ * CONFIRMED from Ghidra analysis of FUN_ram_0000f2b4 (LED init at 0xF2B4):
+ *   PE0 = HSPI CS chip 0   (GPIO active-low, manually toggled)
+ *   PE1 = HSPI CLK         (FUNC_C alternate function)
+ *   PE2 = HSPI MOSI        (FUNC_C alternate function)
+ *   PC0 = HSPI CS chip 1   (GPIO active-low, manually toggled)
+ *   PC2 = LED power MOSFET gate (active-high, same as Rainy 75)
  *
- * 154 LEDs requires 2× AW20216S chips (max 216 channels each = 72 LEDs each at 3 ch/LED).
- * Second CS pin: PC0 is configured as output in firmware alongside PE0.
- * Channel mapping per chip: to be validated at bring-up by lighting individual LEDs.
+ * 154 LEDs × 3 ch = 462 channels. AW20216S max = 216 ch.
+ * Two chips required. Channel mapping validated at bring-up.
  *
- * GSPI peripheral control registers: 0x80140A02 = 0x45 (mode/speed), confirmed.
+ * SPI frequency: firmware writes 0x45 to HSPI control (0x80140A02).
+ * 0x45 = clock divider suggests ~1 MHz. Start at 1 MHz, increase if stable.
  */
-&spi_gspi {
+&pinctrl {
+	pad-mul-sel = <1>;
+
+	/* HSPI: CLK(PE1), MOSI(PE2) — FUNC_C alternate function.
+	 * PE0 used as manual GPIO CS, not hardware HSPI CS pin. */
+	hspi_clk_pe1_default: hspi_clk_pe1_default {
+		pinmux = <B91_PINMUX_SET(B91_PORT_E, B91_PIN_1, B91_FUNC_C)>;
+	};
+	hspi_mosi_pe2_default: hspi_mosi_pe2_default {
+		pinmux = <B91_PINMUX_SET(B91_PORT_E, B91_PIN_2, B91_FUNC_C)>;
+	};
+};
+
+&hspi {
 	status = "okay";
-	pinctrl-0 = <&gspi_default>;
+	peripheral-id = "HSPI_MODULE";
+	cs0-pin = "0";
+	cs1-pin = "0";
+	cs2-pin = "0";
+	pinctrl-0 = <&hspi_clk_pe1_default &hspi_mosi_pe2_default>;
 	pinctrl-names = "default";
-	cs-gpios = <&gpioe 0 GPIO_ACTIVE_LOW>,   /* PE0 = CS chip 0 — CONFIRMED */
-	           <&gpioc 0 GPIO_ACTIVE_LOW>;   /* PC0 = CS chip 1 — CONFIRMED */
+	/* Manual GPIO CS — Zephyr SPI framework handles these automatically */
+	cs-gpios = <&gpioe 0 GPIO_ACTIVE_LOW>,   /* PE0 = CS chip 0 [CONFIRMED] */
+	           <&gpioc 0 GPIO_ACTIVE_LOW>;   /* PC0 = CS chip 1 [CONFIRMED] */
 
 	aw20216s0: aw20216s@0 {
 		compatible = "wobkey,aw20216s";
 		reg = <0>;
 		spi-max-frequency = <1000000>;
-		num-leds = <108>;          /* chip 0: LEDs 0-107 (rows 0-4, 6+12+6+6 col mapping TBD) */
-		global-current = <32>;     /* 0x20 = ~12% — safe starting value */
-		enable-gpios = <&gpioc 2 GPIO_ACTIVE_HIGH>;  /* PC2 = LED power — CONFIRMED */
+		num-leds = <108>;
+		global-current = <32>;
+		enable-gpios = <&gpioc 2 GPIO_ACTIVE_HIGH>;  /* PC2 = LED power [CONFIRMED] */
 		status = "okay";
 	};
 
@@ -372,21 +391,9 @@
 		compatible = "wobkey,aw20216s";
 		reg = <1>;
 		spi-max-frequency = <1000000>;
-		num-leds = <46>;           /* chip 1: LEDs 108-153 */
+		num-leds = <46>;
 		global-current = <32>;
 		status = "okay";
-	};
-};
-
-/* GSPI pin mux: PE0=CS, PE1=CLK, PE2=MOSI (alternate function on GSPI peripheral) */
-&pinctrl {
-	pad-mul-sel = <1>;
-	gspi_default: gspi_default {
-		group1 {
-			psels = <NRF_PSEL(GSPI_CLK,  4, 1)>,  /* PE1 */
-			        <NRF_PSEL(GSPI_MOSI, 4, 2)>;  /* PE2 */
-			/* PE0 used as manual CS GPIO, not SPI peripheral CS */
-		};
 	};
 };
 

@@ -1,13 +1,5 @@
-identifier: crush80
-name: Wobkey Crush 80
-type: kbd
-arch: riscv
-ram: 256
-flash: 1024
-supported:
-  - ble
-  - usb_device
-  - watchdog
-  - adc
-  - gpio
-vendor: wobkey
+board:
+  name: crush80
+  vendor: wobkey
+  socs:
+    - name: tlsr9518
