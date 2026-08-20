@@ -52,24 +52,28 @@ bash flash.sh restore
 
 ## Customising the Keymap
 
-Edit `zmk/boards/crush80/crush80.keymap` and run `bash build.sh --skip-bridge --skip-mcuboot`, then `bash flash.sh stage2`.
+Edit `zmk/boards/crush80/crush80.keymap` and run `bash build.sh --skip-bridge`, then `bash flash.sh stage2`.
 
 **Live editing without rebuilding:** Connect over Bluetooth, open [zmk.studio](https://zmk.studio) in Chrome or Edge. Unlock with `Fn + ESC`.
 
-**Adding home row mods (balanced flavor):**
-```dts
-hml: home_row_mod_left {
-    compatible = "zmk,behavior-hold-tap";
-    #binding-cells = <2>;
-    flavor = "balanced";
-    tapping-term-ms = <280>;
-    quick-tap-ms = <175>;
-    require-prior-idle-ms = <150>;
-    bindings = <&kp>, <&kp>;
-    hold-trigger-key-positions = <KEYS_R THUMBS>;
-    hold-trigger-on-release;
-};
-```
+---
+
+## Layers
+
+The default keymap implements 6 layers (synced from the kanata configuration):
+
+| Layer | Trigger | Purpose |
+|-------|---------|---------|
+| Base | Default | Home row mods (CAGS), media F-row, thumb Shift/Tab |
+| Fn | Hold Fn key | F1-F12, BT profiles, RGB, USB/BT toggle |
+| Nav | Hold W | IJKL arrows, Bspc/Del, Home/End, editing shortcuts |
+| ExtNav | Hold Space (in Nav) | Word-jump, PgUp/PgDn, word delete |
+| Sym | Hold Caps or ' | Numbers left (4-5-6/7-8-9/0), brackets/punctuation right |
+| Native | Toggle ScrLk | Full passthrough (all remapping off) |
+
+**Home Row Mods (CAGS):** A=Ctrl, S=Alt, D=Gui, F=Shift / J=Shift, K=Gui, L=Alt, ;=Ctrl
+
+**Bottom row:** LAlt position = Shift (thumb), RAlt position = Tab
 
 ---
 
@@ -80,8 +84,12 @@ hml: home_row_mod_left {
 | `Fn + F1/F2/F3` | BT profile 1/2/3 |
 | `Fn + F4` | Switch to USB output |
 | `Fn + F5` | Toggle USB / Bluetooth |
-| `Fn + Delete` | Clear current BT profile |
+| `Fn + Ins` | Clear current BT profile |
 | `Fn + ESC` | Unlock ZMK Studio |
+| `Fn + Bspc` | RGB toggle |
+| `Fn + \` / `Fn + Enter` | RGB effect cycle |
+| `Fn + Up` / `Fn + Down` | RGB brightness up/down |
+| `ScrLk` | Toggle Native layer (disable all remapping) |
 
 ---
 

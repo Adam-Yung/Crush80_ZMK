@@ -15,7 +15,7 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 SKIP_BRIDGE=false
-SKIP_MCUBOOT=true   # MCUboot: use rainy75-zmk's pre-built copy (same TLSR9511 MCU)
+SKIP_MCUBOOT=true   # MCUboot: built separately or use pre-built copy
                     # Build explicitly with: bash build.sh --build-mcuboot
 
 for arg in "$@"; do
@@ -30,8 +30,6 @@ done
 if [ -f "$REPO_DIR/.workspace_path" ]; then
     # shellcheck source=/dev/null
     source "$REPO_DIR/.workspace_path"
-elif [ -d "$HOME/Projects/crush80/rainy75-zmk/.west" ]; then
-    WORKSPACE_DIR="$HOME/Projects/crush80/rainy75-zmk"
 elif [ -d "$HOME/Projects/crush80-workspace/.west" ]; then
     WORKSPACE_DIR="$HOME/Projects/crush80-workspace"
 else
