@@ -59,14 +59,11 @@ CONF="$REPO_DIR/conf/app.conf"
 OVERLAY="$WORKSPACE_DIR/conf/mcumgr.overlay"
 
 # Crush 80 specific overrides:
-#   - Rename from "Rainy 75 Pro" to "Crush 80"
-#   - Disable Rainy 75 WS2812 RGB engine (Crush 80 uses AW20216S via HSPI)
-#   - Disable PSPI/WS2812 LED strip driver (not on Crush 80)
+#   app.conf already sets CONFIG_ZMK_KEYBOARD_NAME but this override
+#   ensures the name is correct even if app.conf is not the primary conf.
 OVERRIDE_CONF="$(mktemp /tmp/crush80_override.XXXXXX.conf)"
 cat > "$OVERRIDE_CONF" << 'EOF'
 CONFIG_ZMK_KEYBOARD_NAME="Crush 80"
-CONFIG_RAINY_RGB=n
-CONFIG_LED_STRIP_B91_SPI=n
 EOF
 
 # ── MCUboot ──────────────────────────────────────────────────────────────────
@@ -91,7 +88,7 @@ if [ "$SKIP_BRIDGE" = false ]; then
     echo "[2/3] Building OTA bridge..."
     # Bridge uses only ota-bridge.conf — NOT app.conf (which enables MCUboot)
     BRIDGE_OVERRIDE="$(mktemp /tmp/crush80_bridge.XXXXXX.conf)"
-    printf 'CONFIG_ZMK_KEYBOARD_NAME="Crush 80 Bridge"\nCONFIG_RAINY_RGB=n\nCONFIG_LED_STRIP_B91_SPI=n\n' > "$BRIDGE_OVERRIDE"
+    printf 'CONFIG_ZMK_KEYBOARD_NAME="Crush 80 Bridge"\n' > "$BRIDGE_OVERRIDE"
     west build \
         -s zmk-src/app \
         -b crush80 \
