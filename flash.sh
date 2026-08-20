@@ -103,24 +103,12 @@ if [ "$STAGE" = "restore" ]; then
     echo "  Restoring stock Evision firmware"
     echo "========================================"
     echo ""
-    STOCK="$REPO_DIR/firmware/code_2M_v2_patched.bin"
-    if [ ! -f "$STOCK" ]; then
-        echo "ERROR: Stock firmware not found at $STOCK"
-        exit 1
+    # Delegate to restore_stock.sh which handles firmware path prompting
+    RESTORE_ARGS=""
+    if [ -n "${2:-}" ] && [ -f "${2:-}" ]; then
+        RESTORE_ARGS="$2"
     fi
-
-    # Try mcumgr flash_mgmt path first (if ZMK is running)
-    PORT="$(find_serial_port)"
-    if [ -n "$PORT" ]; then
-        echo "  ZMK serial port found at $PORT — using flash_mgmt..."
-        bash "$REPO_DIR/restore_stock.sh" -y 2>/dev/null || \
-            python3 "$REPO_DIR/scripts/flash_ota.py" "$STOCK"
-    else
-        echo "  No serial port — using OTA flasher directly..."
-        python3 "$REPO_DIR/scripts/flash_ota.py" "$STOCK"
-    fi
-    echo ""
-    echo "  Stock firmware restored. Keyboard reverted to Evision/VIA firmware."
+    bash "$REPO_DIR/restore_stock.sh" $RESTORE_ARGS
 fi
 
 echo ""
