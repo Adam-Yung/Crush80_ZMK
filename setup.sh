@@ -18,7 +18,7 @@ echo "=============================================="
 echo ""
 
 # ── 1. System packages ──────────────────────────────────────────────────────
-echo "[1/6] Installing system packages (needs sudo)..."
+echo "[1/7] Installing system packages (needs sudo)..."
 sudo apt-get update -qq
 sudo apt-get install -y -q \
     git cmake ninja-build python3-pip wget xz-utils \
@@ -26,7 +26,7 @@ sudo apt-get install -y -q \
 echo "    System packages installed."
 
 # ── 2. Python tools ─────────────────────────────────────────────────────────
-echo "[2/6] Installing Python tools..."
+echo "[2/7] Installing Python tools..."
 pip3 install --break-system-packages -r "$REPO_DIR/requirements.txt"
 echo "    Python tools installed. west: $(west --version 2>/dev/null || echo 'check PATH')"
 
@@ -38,7 +38,7 @@ if ! echo "$PATH" | grep -q "$HOME/.local/bin"; then
 fi
 
 # ── 3. Zephyr SDK 0.17.0 ────────────────────────────────────────────────────
-echo "[3/6] Zephyr SDK 0.17.0..."
+echo "[3/7] Zephyr SDK 0.17.0..."
 if [ -f "$SDK_DIR/riscv64-zephyr-elf/bin/riscv64-zephyr-elf-gcc" ]; then
     echo "    SDK already present at $SDK_DIR — skipping download."
 else
@@ -53,7 +53,7 @@ else
 fi
 
 # ── 4. West workspace ────────────────────────────────────────────────────────
-echo "[4/6] West workspace at $WORKSPACE_DIR..."
+echo "[4/7] West workspace at $WORKSPACE_DIR..."
 if [ -d "$WORKSPACE_DIR/.west" ]; then
     echo "    Workspace already initialised — running west update..."
     cd "$WORKSPACE_DIR"
@@ -74,14 +74,42 @@ else
 fi
 
 # ── 5. Telink BLE blob ───────────────────────────────────────────────────────
-echo "[5/6] Telink BLE blob..."
+echo "[5/7] Telink BLE blob..."
 cd "$WORKSPACE_DIR"
 bash fetch_ble_blob.sh
 
 # ── 6. Zephyr Python requirements + cmake registration ───────────────────────
-echo "[6/6] Zephyr Python requirements and cmake package..."
+echo "[6/7] Zephyr Python requirements and cmake package..."
 pip3 install --break-system-packages -r "$WORKSPACE_DIR/zephyr/scripts/requirements.txt" -q
 cmake -P "$WORKSPACE_DIR/zephyr/share/zephyr-package/cmake/zephyr_export.cmake"
+
+# ── 7. Go toolchain + mcumgr (required for firmware flashing) ────────────────
+echo "[7/7] Go toolchain and mcumgr..."
+GO_VERSION="1.22.5"
+GO_DIR="/usr/local/go"
+if [ -x "$GO_DIR/bin/go" ]; then
+    echo "    Go already installed: $($GO_DIR/bin/go version)"
+else
+    echo "    Installing Go $GO_VERSION..."
+    wget -q --show-progress "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -O /tmp/go.tar.gz
+    sudo rm -rf "$GO_DIR"
+    sudo tar -C /usr/local -xzf /tmp/go.tar.gz
+    rm /tmp/go.tar.gz
+    echo "    Go installed: $($GO_DIR/bin/go version)"
+fi
+
+export PATH="$GO_DIR/bin:$HOME/go/bin:$PATH"
+if ! echo "$PATH" | grep -q "$GO_DIR/bin"; then
+    echo "export PATH=$GO_DIR/bin:\$HOME/go/bin:\$PATH" >> "$HOME/.bashrc"
+fi
+
+if [ -x "$HOME/go/bin/mcumgr" ]; then
+    echo "    mcumgr already installed."
+else
+    echo "    Installing mcumgr..."
+    "$GO_DIR/bin/go" install github.com/apache/mynewt-mcumgr-cli/mcumgr@latest
+    echo "    mcumgr installed: $HOME/go/bin/mcumgr"
+fi
 
 # ── Apply patches ────────────────────────────────────────────────────────────
 echo "Applying patches..."
