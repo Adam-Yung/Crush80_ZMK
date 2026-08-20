@@ -1,19 +1,19 @@
 #!/bin/bash
-# Restore stock Evision firmware on a Rainy 75 Pro running ZMK.
+# Restore stock Evision firmware on a Crush 80 running ZMK.
 #
 # Uses the custom flash_mgmt mcumgr group to write the original firmware
 # directly to flash offset 0x0, then resets. All over USB CDC ACM.
 #
 # Prerequisites:
 #   - Keyboard connected via USB, running ZMK firmware (VID 1d50:615e)
-#   - Original firmware backup at reverse/firmware/firmware_ota.bin
+#   - Stock firmware .bin file (download from Wobkey's official site)
+#   - mcumgr installed (setup.sh handles this)
 #
 # Usage:
-#   ./restore_stock.sh                              # interactive
-#   ./restore_stock.sh -y                            # non-interactive
-#   ./restore_stock.sh path/to/firmware_ota.bin      # custom firmware file
-#   ./restore_stock.sh --port /dev/ttyACM1           # custom serial port
-#   ./restore_stock.sh --no-verify                   # skip read-back verify
+#   ./restore_stock.sh                          # interactive (prompts for firmware path)
+#   ./restore_stock.sh path/to/firmware.bin     # specify firmware file
+#   ./restore_stock.sh -y path/to/firmware.bin  # non-interactive
+#   ./restore_stock.sh --port /dev/ttyACM1      # custom serial port
 
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -33,9 +33,8 @@ die()    { err "$@"; exit 1; }
 header() { echo -e "\n${BOLD}$*${NC}"; }
 
 # ── Defaults ─────────────────────────────────────────────────
-FIRMWARE="reverse/firmware/firmware_ota.bin"
+FIRMWARE=""
 SERIAL_PORT="${SERIAL_PORT:-/dev/ttyACM0}"
-EXTRA_ARGS=""
 AUTO_YES=0
 STOCK_VID="320f"
 STOCK_PID="5055"
@@ -46,15 +45,38 @@ ZMK_PID="615e"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --port)      SERIAL_PORT="$2"; shift 2 ;;
-        --no-verify) EXTRA_ARGS="$EXTRA_ARGS --no-verify"; shift ;;
         -y|--yes)    AUTO_YES=1; shift ;;
         --help|-h)
-            echo "Usage: $0 [-y] [firmware.bin] [--port /dev/ttyACMx] [--no-verify]"
+            echo "Usage: $0 [-y] [firmware.bin] [--port /dev/ttyACMx]"
+            echo ""
+            echo "If no firmware file is specified, you will be prompted to enter the path."
+            echo "Download the latest Crush 80 firmware from Wobkey's official site."
             exit 0 ;;
         -*) die "Unknown option: $1" ;;
         *)  FIRMWARE="$1"; shift ;;
     esac
 done
+
+# ── Prompt for firmware path if not provided ─────────────────
+if [[ -z "$FIRMWARE" ]]; then
+    echo ""
+    info "No firmware file specified."
+    info "Download the latest Crush 80 firmware from Wobkey's official site:"
+    info "  https://wobkey.com/pages/support (or check your email for the download link)"
+    echo ""
+    info "The file is typically named 'code_2M.bin' or 'Crush80_vX.X.bin'."
+    echo ""
+    read -rp "Enter path to the stock firmware .bin file: " FIRMWARE
+    [[ -n "$FIRMWARE" ]] || die "No path entered. Aborting."
+fi
+
+# Expand tilde and resolve path
+FIRMWARE="${FIRMWARE/#\~/$HOME}"
+[[ -f "$FIRMWARE" ]] || die "Firmware file not found: $FIRMWARE"
+
+# ── Locate mcumgr ────────────────────────────────────────────
+MCUMGR="${MCUMGR:-$(command -v mcumgr 2>/dev/null || echo "$HOME/go/bin/mcumgr")}"
+[[ -x "$MCUMGR" ]] || die "mcumgr not found. Install: go install github.com/apache/mynewt-mcumgr-cli/mcumgr@latest"
 
 # ── Helpers ──────────────────────────────────────────────────
 check_usb() {
@@ -75,13 +97,10 @@ wait_for_usb() {
     ok "$desc detected (${elapsed}s)"
 }
 
-# ── Validate prerequisites ───────────────────────────────────
-[[ -f "$FIRMWARE" ]] || die "Firmware file not found: $FIRMWARE"
-
 # ── Check current state ─────────────────────────────────────
 START_TIME=$SECONDS
 
-header "=== Rainy 75 Pro: Restore Stock Firmware ==="
+header "=== Crush 80: Restore Stock Firmware ==="
 
 if check_usb "$STOCK_VID" "$STOCK_PID"; then
     ok "Keyboard is already running stock firmware."
@@ -93,13 +112,13 @@ if ! check_usb "$ZMK_VID" "$ZMK_PID"; then
 fi
 
 info "ZMK firmware detected."
-info "  Firmware: $FIRMWARE ($(stat -c%s "$FIRMWARE") bytes)"
+info "  Firmware: $FIRMWARE ($(stat -c%s "$FIRMWARE" 2>/dev/null || stat -f%z "$FIRMWARE") bytes)"
 info "  Port: $SERIAL_PORT"
 
 if [[ $AUTO_YES -eq 0 ]]; then
     echo ""
-    info "This will erase ZMK and write the original Evision firmware."
-    info "If interrupted, the keyboard may require EVK to recover."
+    warn "This will erase ZMK and write the stock Evision firmware."
+    warn "If interrupted mid-write, the keyboard may require EVK/SWS to recover."
     read -rp "Proceed? [y/N] " confirm
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         info "Aborted."
@@ -107,9 +126,30 @@ if [[ $AUTO_YES -eq 0 ]]; then
     fi
 fi
 
-# ── Run restore tool ────────────────────────────────────────
+# ── Wait for serial port ─────────────────────────────────────
+if [[ ! -e "$SERIAL_PORT" ]]; then
+    info "Serial port $SERIAL_PORT not found, scanning..."
+    for dev in /dev/ttyACM0 /dev/ttyACM1 /dev/ttyUSB0; do
+        if [[ -e "$dev" ]]; then
+            SERIAL_PORT="$dev"
+            info "Found: $SERIAL_PORT"
+            break
+        fi
+    done
+    [[ -e "$SERIAL_PORT" ]] || die "No serial port found. Is the keyboard connected?"
+fi
+
+# ── Write firmware via mcumgr flash_mgmt ─────────────────────
+header "Writing stock firmware to flash 0x0..."
+info "This writes directly to flash and resets. Do NOT unplug the keyboard."
 echo ""
-python3 reverse/tools/restore_original.py --yes --port "$SERIAL_PORT" $EXTRA_ARGS "$FIRMWARE"
+
+"$MCUMGR" --conntype serial --connstring "dev=$SERIAL_PORT,baud=115200" \
+    flash-mgmt write 0x0 "$FIRMWARE"
+
+info "Resetting keyboard..."
+"$MCUMGR" --conntype serial --connstring "dev=$SERIAL_PORT,baud=115200" \
+    reset
 
 # Wait for stock firmware to appear
 wait_for_usb "$STOCK_VID" "$STOCK_PID" "stock firmware" 30
@@ -118,4 +158,4 @@ ELAPSED=$((SECONDS - START_TIME))
 echo ""
 ok "Restore complete (${ELAPSED}s)"
 info "Keyboard is running stock Evision firmware (${STOCK_VID}:${STOCK_PID})."
-info "To reinstall ZMK: ./install_zmk.sh"
+info "To reinstall ZMK: bash install_zmk.sh"
