@@ -85,12 +85,7 @@ cmake -P "$WORKSPACE_DIR/zephyr/share/zephyr-package/cmake/zephyr_export.cmake"
 
 # ── Apply patches ────────────────────────────────────────────────────────────
 echo "Applying patches..."
-cd "$WORKSPACE_DIR/zmk-src"
-git apply "$WORKSPACE_DIR/patches/zmk-src/0001-zmk-usb-no-vbus-detect.patch" 2>/dev/null \
-    && echo "    ZMK patch applied." || echo "    ZMK patch already applied."
-cd "$WORKSPACE_DIR/modules/hal/hal_telink"
-git apply "$WORKSPACE_DIR/patches/hal_telink/0001-exclude-sys-for-BT_HCI_B91.patch" 2>/dev/null \
-    && echo "    hal_telink patch applied." || echo "    hal_telink patch already applied."
+bash "$REPO_DIR/patches/apply-patches.sh" "$WORKSPACE_DIR"
 
 # ── Write workspace path for build.sh ────────────────────────────────────────
 echo "WORKSPACE_DIR=$WORKSPACE_DIR" > "$REPO_DIR/.workspace_path"
