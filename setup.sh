@@ -22,7 +22,7 @@ echo "[1/7] Installing system packages (needs sudo)..."
 sudo apt-get update -qq
 sudo apt-get install -y -q \
     git cmake ninja-build python3-pip wget xz-utils \
-    libusb-1.0-0-dev file protobuf-compiler
+    libusb-1.0-0-dev libhidapi-dev file protobuf-compiler
 echo "    System packages installed."
 
 # ── 2. Python tools ─────────────────────────────────────────────────────────

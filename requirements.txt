@@ -13,3 +13,6 @@ pykwalify>=1.8.0
 # ZMK Studio / nanopb protobuf code generation (required for ZMK Studio support)
 protobuf
 grpcio-tools
+
+# HID device access for OTA firmware flashing (cross-platform: Linux/macOS/Windows)
+hidapi>=0.14.0
