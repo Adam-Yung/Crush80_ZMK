@@ -74,7 +74,7 @@ mkdir -p "$WORKSPACE_DIR/zmk/zephyr"
 cp "$REPO_DIR/zmk/zephyr/module.yml" "$WORKSPACE_DIR/zmk/zephyr/"
 mkdir -p "$WORKSPACE_DIR/zmk/src" "$WORKSPACE_DIR/zmk/include"
 cp "$REPO_DIR/zmk/src/"* "$WORKSPACE_DIR/zmk/src/" 2>/dev/null || true
-cp "$REPO_DIR/zmk/include/"* "$WORKSPACE_DIR/zmk/include/" 2>/dev/null || true
+cp -r "$REPO_DIR/zmk/include/"* "$WORKSPACE_DIR/zmk/include/" 2>/dev/null || true
 
 # Sync conf files
 cp "$REPO_DIR/conf/"* "$WORKSPACE_DIR/conf/"

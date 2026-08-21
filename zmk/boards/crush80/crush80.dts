@@ -47,12 +47,33 @@
 		zephyr,flash-controller = &flash_mspi;
 		zephyr,code-partition = &slot0_partition;
 		zephyr,bt-hci = &bt_hci;
+		zephyr,boot-mode = &retention_boot_mode;
 		zmk,battery = &battery;
 		zmk,kscan = &kscan0;
 		zmk,physical-layout = &crush80_layout;
 		/* LED controllers: aw20216s0 and aw20216s1 (2x AW20216S via GSPI).
 		 * zmk,underglow not set here — crush80_rgb.c addresses both chips directly.
 		 * Pins confirmed: PE0=CS0, PE1=CLK, PE2=MOSI, PC0=CS1, PC2=power */
+	};
+
+	sram_noinit: sram@9FFF0 {
+		compatible = "zephyr,memory-region", "mmio-sram";
+		reg = <0x9FFF0 0x10>;
+		zephyr,memory-region = "RetainedMem";
+		status = "okay";
+
+		retainedmem {
+			compatible = "zephyr,retained-ram";
+			status = "okay";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			retention_boot_mode: boot_mode@0 {
+				compatible = "zephyr,retention";
+				status = "okay";
+				reg = <0x0 0x10>;
+			};
+		};
 	};
 
 	bt_hci: bt_hci {
