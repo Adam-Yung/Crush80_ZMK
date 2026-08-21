@@ -1,0 +1,176 @@
+From 286b7abc437c782f8d7725f21004c81da1b7d6ef Mon Sep 17 00:00:00 2001
+From: scholzri <33288574+scholzri@users.noreply.github.com>
+Date: Sat, 25 Jul 2026 13:17:28 +0200
+Subject: [PATCH] zmk: drive USB remote wakeup from the HID send path
+
+zmk_usb_hid_send_report() already asks for a wakeup when the endpoint
+status is SUSPEND. Two gaps showed up on hardware (Telink B91):
+
+  - The status is not always SUSPEND when the host is asleep. Some host
+    sleep flavors leave the device without a clean suspend indication,
+    so the request was never issued and the fallback re-presented the
+    device: a full re-enumeration, ~0.6 s of dead HID plus the
+    keystrokes typed into it.
+  - A wakeup that does not take needs a fallback, but re-presenting
+    immediately defeats the wakeup that may still be in flight.
+
+Keep the policy in usb.c, next to the re-attach machinery it governs,
+rather than splitting it across the send path:
+
+  - usb_wake_pulse() drives at most one wakeup per retry window and
+    reports whether remote wakeup can restore this link at all (Zephyr
+    answers -EACCES until the host arms DEVICE_REMOTE_WAKEUP).
+  - zmk_usb_user_activity_while_suspended() prefers the pulse and falls
+    back to re-presenting only when the host cannot be resumed, or when
+    a pulse has had its window and the bus is still down.
+  - zmk_usb_report_send_result() pulses on a failed write: a host that
+    stopped draining the endpoint after arming remote wakeup is asleep,
+    whatever status we were told. Escalation stays with the starvation
+    detector, so the bind-window grace still governs re-presenting.
+
+The send path is then one call in each case, with no wake timers of its
+own.
+
+Verified on a Rainy 75 (Telink B91) against a sleeping Linux host: the
+keypress resumes the bus with no DETACH, no SET_CONFIGURATION and an
+unchanged kernel device number.
+
+Signed-off-by: Richard Scholz <33288574+scholzri@users.noreply.github.com>
+---
+ app/include/zmk/usb.h |  9 ++++---
+ app/src/usb.c         | 63 ++++++++++++++++++++++++++++++++++++++++---
+ app/src/usb_hid.c     | 13 ++++-----
+ 3 files changed, 71 insertions(+), 14 deletions(-)
+
+diff --git a/app/include/zmk/usb.h b/app/include/zmk/usb.h
+index 186243cb..61dc15a1 100644
+--- a/app/include/zmk/usb.h
++++ b/app/include/zmk/usb.h
+@@ -30,7 +30,8 @@ bool zmk_usb_is_hid_ready(void);
+ // detect a configured-but-starved device (host never drains the IN endpoint).
+ void zmk_usb_report_send_result(bool ok);
+ 
+-// Notify that the user generated input while the bus was suspended — an
+-// explicit recovery/wake request (used in place of USB remote wakeup on
+-// hardware that lacks it).
+-void zmk_usb_user_activity_while_suspended(void);
++// Notify that the user generated input while the bus was suspended: an explicit
++// request to get the link back. Drives USB remote wakeup where the host has
++// armed it, and re-presents the device where it has not. Returns the wakeup
++// request's result (0, or a negative errno when the host cannot be resumed).
++int zmk_usb_user_activity_while_suspended(void);
+diff --git a/app/src/usb.c b/app/src/usb.c
+index 13e7b46e..fc570f07 100644
+--- a/app/src/usb.c
++++ b/app/src/usb.c
+@@ -127,17 +127,72 @@ static bool user_wake_pending;
+ // Uptime of the most recent completed enumeration, for the bind grace above.
+ static int64_t last_configured_at;
+ 
++// How long a remote-wakeup pulse gets to prove itself, and the minimum spacing
++// between pulses. Resume signaling takes effect in tens of milliseconds, so if
++// the user is still typing into a suspended bus this long after a pulse, it did
++// not land and only re-presenting the device will restore the link. The same
++// window keeps a held key from hammering the bus.
++#define USB_WAKE_PULSE_RETRY_MS 1500
++
++// Uptime of the last remote-wakeup pulse (0 = none driven yet).
++static int64_t last_wake_pulse;
++
++// Ask the host to resume the bus, at most one pulse per retry window.
++//
++// Returns 0 when a pulse was driven or a recent one is still in flight, and a
++// negative errno when remote wakeup cannot restore this link: Zephyr answers
++// -EACCES until the host has armed SET_FEATURE(DEVICE_REMOTE_WAKEUP), and
++// -ENOTSUP where the controller has no resume support at all. Either way the
++// answer means only re-presenting the device can help.
++static int usb_wake_pulse(void) {
++    int64_t now = k_uptime_get();
++
++    if (last_wake_pulse != 0 && (now - last_wake_pulse) < USB_WAKE_PULSE_RETRY_MS) {
++        return 0;
++    }
++
++    int err = usb_wakeup_request();
++
++    if (err == 0) {
++        last_wake_pulse = now;
++    }
++    return err;
++}
++
+ void zmk_usb_report_send_result(bool ok) {
+     if (ok) {
+         usb_send_failures = 0;
+-    } else if (usb_send_failures < UINT32_MAX) {
++        return;
++    }
++
++    if (usb_send_failures < UINT32_MAX) {
+         usb_send_failures++;
+     }
++
++    // A write failing while the host has armed remote wakeup means it stopped
++    // draining the endpoint after granting us wake permission, i.e. it is
++    // asleep whatever status we were told. This covers host sleeps that never
++    // deliver a clean SUSPEND. Escalation stays with the starvation detector
++    // below, so the bind grace still governs re-presenting.
++    usb_wake_pulse();
+ }
+ 
+-void zmk_usb_user_activity_while_suspended(void) {
+-    user_wake_pending = true;
+-    k_work_reschedule(&usb_reattach_work, K_NO_WAIT);
++int zmk_usb_user_activity_while_suspended(void) {
++    // How long the previous pulse has had, sampled before this one replaces it.
++    int64_t since_pulse = k_uptime_get() - last_wake_pulse;
++    int err = usb_wake_pulse();
++
++    // Prefer true remote wakeup: the host resumes the bus with no
++    // re-enumeration, so no HID blackout and no keystrokes lost to it. Fall
++    // back to re-presenting the device when the host cannot be resumed, or
++    // when a pulse already had its window and we are demonstrably still
++    // suspended (we are executing this, so we are).
++    if (err != 0 || (last_wake_pulse != 0 && since_pulse < USB_WAKE_PULSE_RETRY_MS)) {
++        user_wake_pending = true;
++        k_work_reschedule(&usb_reattach_work, K_NO_WAIT);
++    }
++
++    return err;
+ }
+ 
+ // Uptime of the last re-attach cycle (also stamped on entering host-asleep
+diff --git a/app/src/usb_hid.c b/app/src/usb_hid.c
+index b4eab790..662b92a7 100644
+--- a/app/src/usb_hid.c
++++ b/app/src/usb_hid.c
+@@ -187,11 +187,10 @@ static const struct hid_ops ops = {
+ static int zmk_usb_hid_send_report(const uint8_t *report, size_t len) {
+     switch (zmk_usb_get_status()) {
+     case USB_DC_SUSPEND:
+-        // A keypress while suspended is the user asking for the connection
+-        // back: hardware without remote wakeup (B91) re-presents the device
+-        // instead (see the dead-bus heartbeat).
+-        zmk_usb_user_activity_while_suspended();
+-        return usb_wakeup_request();
++        // A keypress while suspended is the user asking for the link back.
++        // usb.c owns how: remote wakeup where the host armed it, re-presenting
++        // the device where it did not.
++        return zmk_usb_user_activity_while_suspended();
+     case USB_DC_ERROR:
+     case USB_DC_RESET:
+     case USB_DC_DISCONNECTED:
+@@ -208,7 +207,9 @@ static int zmk_usb_hid_send_report(const uint8_t *report, size_t len) {
+         // Feed the dead-bus heartbeat's HID-starvation detector: a device
+         // that is CONFIGURED but whose interrupt IN endpoint is never
+         // drained (host HID driver failed to bind, seen after macOS
+-        // dark-wake enumerations) fails every write with -EAGAIN.
++        // dark-wake enumerations) fails every write with -EAGAIN. A failure
++        // also asks the host to resume, which covers sleeps that never
++        // delivered a clean SUSPEND.
+         zmk_usb_report_send_result(err == 0);
+ 
+         return err;
+-- 
+2.53.0
+

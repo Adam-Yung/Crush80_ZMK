@@ -1,0 +1,87 @@
+From 91fc712aa24091b48093bd7dad46e331a2854e71 Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Sat, 25 Jul 2026 12:10:31 +0200
+Subject: [PATCH] zmk: don't re-attach USB during the host's HID bind window
+
+The dead-bus heartbeat re-attaches a CONFIGURED device after three
+consecutive failed HID sends, on the theory that the host never bound its
+HID driver (a macOS dark-wake artifact). That rule also fires during an
+ordinary wake: the host binds its HID driver a moment after
+SET_CONFIGURATION, and a user who just woke the machine is already typing
+before that completes, so those first reports legitimately fail.
+
+Ignore send failures inside a 5 s grace window after each completed
+enumeration, and drop failures accumulated while the link was down, since
+they say nothing about the fresh enumeration. A genuinely half-enumerated
+binding keeps failing well past the window, so that recovery is delayed,
+not lost.
+
+(Regenerated against this tree from ecliptik's PR #20 patch; original
+context assumed LOG_INF where this tree has LOG_DBG.)
+
+Signed-off-by: Micheal Waltz <micheal@ecliptik.com>
+---
+ app/src/usb.c | 27 ++++++++++++++++++++++++++-
+ 1 file changed, 26 insertions(+), 1 deletion(-)
+
+diff --git a/app/src/usb.c b/app/src/usb.c
+index 157f4491..13e7b46e 100644
+--- a/app/src/usb.c
++++ b/app/src/usb.c
+@@ -107,11 +107,26 @@ static K_WORK_DELAYABLE_DEFINE(usb_reattach_work, usb_reattach_work_cb);
+ // dead and re-attached (each keypress that fails all its endpoint-write
+ // retries counts once).
+ #define USB_REATTACH_HID_FAIL_THRESHOLD 3
++// Grace period after an enumeration completes before failed HID sends are
++// allowed to count toward the starvation verdict above.
++//
++// A host binds its HID driver a moment after SET_CONFIGURATION, and a user
++// waking the machine is typically already typing before that finishes. Those
++// first reports legitimately fail, and counting them made the detector cycle a
++// perfectly healthy device: measured on hardware as a second, needless
++// re-attach 2.6 s after the wake enumeration, which then swallowed several more
++// keystrokes — the typing caused the outage that ate the typing. A real
++// half-enumerated binding still fails long after this window, so the recovery
++// it was written for is only delayed, not lost.
++#define USB_REATTACH_HID_BIND_GRACE_MS 5000
+ 
+ // Set when the user pressed a key while the bus was suspended: the one signal
+ // that recovery is needed *right now* (and that waking the host is desired).
+ static bool user_wake_pending;
+ 
++// Uptime of the most recent completed enumeration, for the bind grace above.
++static int64_t last_configured_at;
++
+ void zmk_usb_report_send_result(bool ok) {
+     if (ok) {
+         usb_send_failures = 0;
+@@ -160,8 +175,14 @@ static void usb_reattach_work_cb(struct k_work *work) {
+     // (host never bound its HID driver — macOS dark-wake artifact); a fresh
+     // attach is the only recovery, and it is safe because the link is
+     // already broken for the user.
++    //
++    // Ignore failures inside the bind grace window: right after an enumeration
++    // they are the host still binding, not a dead binding, and cycling there
++    // costs the user the keystrokes they are in the middle of typing.
+     bool hid_starved = (usb_status == USB_DC_CONFIGURED &&
+-                        usb_send_failures >= USB_REATTACH_HID_FAIL_THRESHOLD);
++                        usb_send_failures >= USB_REATTACH_HID_FAIL_THRESHOLD &&
++                        (k_uptime_get() - last_configured_at) >=
++                            USB_REATTACH_HID_BIND_GRACE_MS);
+ 
+     // Cycle only on a provably dead bus:
+     //  - SUSPEND: the controller's idle detector fired (no SOFs for >3 ms) and
+@@ -255,6 +276,10 @@ void usb_status_cb(enum usb_dc_status_code status, const uint8_t *params) {
+         LOG_DBG("Suspend from configured: host asleep");
+     } else if (status == USB_DC_CONFIGURED) {
+         host_asleep = false;
++        // Start the bind grace window, and drop failures accumulated while the
++        // link was down — they say nothing about this fresh enumeration.
++        last_configured_at = k_uptime_get();
++        usb_send_failures = 0;
+     }
+     usb_status_events++;
+ #endif
+-- 
+2.53.0
+

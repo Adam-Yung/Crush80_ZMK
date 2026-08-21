@@ -1,0 +1,357 @@
+From 7a4e30a691436a3de6e20bae318e6865f964603f Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Thu, 16 Jul 2026 10:21:40 -0700
+Subject: [PATCH] zmk: recover a dead USB bus while suspended (no-VBUS-detect
+ boards)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Boards without a USB VBUS-detect pin (e.g. the Telink B91) cannot observe
+cable/host removal: the bus goes idle and USB parks in SUSPEND with the
+pull-up asserted. A controller left there for a long time routinely misses
+the returning host's bus reset and never re-enumerates, so the keyboard is
+dead until physically re-plugged or power-cycled.
+
+Add CONFIG_ZMK_USB_SUSPEND_REATTACH: a periodic work that re-presents the
+device (usb_disable()/usb_enable()) but only when the bus is provably dead,
+with three guards learned from hardware testing:
+
+- Silent while healthy: never cycles a CONFIGURED device or an enumeration
+  in flight (tracked via a status-event counter).
+- Silent while the host sleeps: a suspend entered directly from CONFIGURED
+  is a deliberate host sleep, not a dead bus — cycling there dark-wakes the
+  host and can wedge a shared hub. Recovery instead rides on the next
+  keypress (zmk_usb_user_activity_while_suspended(), from the HID send
+  path), re-presenting the device in place of USB remote wakeup.
+- Damped: consecutive unanswered re-attaches back off exponentially, so a
+  slow host can never be driven into an enumeration-backoff spiral. A
+  CONFIGURED-but-HID-starved device (host bound no driver) forces one fresh
+  attach.
+
+Requires the USB device driver to deliver USB_DC_SUSPEND/RESUME correctly.
+Default n; wired-only boards opt in.
+---
+ app/Kconfig           |  29 +++++++
+ app/include/zmk/usb.h |   9 ++
+ app/src/usb.c         | 197 ++++++++++++++++++++++++++++++++++++++++++
+ app/src/usb_hid.c     |  10 +++
+ 4 files changed, 245 insertions(+)
+
+diff --git a/app/Kconfig b/app/Kconfig
+index 700a05cd..baac9ba3 100644
+--- a/app/Kconfig
++++ b/app/Kconfig
+@@ -141,6 +141,35 @@ config USB_NUMOF_EP_WRITE_RETRIES
+ config USB_HID_POLL_INTERVAL_MS
+     default 1
+ 
++config ZMK_USB_SUSPEND_REATTACH
++    bool "Recover a dead USB bus while suspended (no-VBUS-detect boards)"
++    help
++      For boards without a USB VBUS-detection pin, the controller cannot tell
++      that the host or cable went away: the bus simply goes idle and USB parks
++      in the SUSPEND state with the data-line pull-up still asserted. If the
++      host later returns, the long-suspended PHY often misses the bus reset and
++      never re-enumerates, so the keyboard appears dead until it is physically
++      re-plugged or power-cycled.
++
++      When set, a periodic work re-presents the device (drop and re-raise the
++      pull-up via usb_disable()/usb_enable()) but ONLY when the bus is provably
++      dead: it is silent while a healthy host has us configured, and silent
++      while a host merely sleeps (a deliberate host suspend, entered directly
++      from the configured state) so it neither dark-wakes the host nor disturbs
++      a shared hub. Recovery of a truly dead bus uses an exponential backoff;
++      when a host is asleep, recovery instead rides on the next keypress (which
++      re-presents the device in place of USB remote wakeup). Requires the USB
++      device driver to deliver USB_DC_SUSPEND/RESUME correctly. Intended for
++      wired-only boards.
++
++config ZMK_USB_SUSPEND_REATTACH_MS
++    int "Base interval between USB re-attach attempts while suspended (ms)"
++    default 1000
++    depends on ZMK_USB_SUSPEND_REATTACH
++    help
++      Base period of the dead-bus recovery work. Consecutive unanswered
++      re-attach attempts back off exponentially from this value.
++
+ endif # ZMK_USB
+ 
+ menuconfig ZMK_BLE
+diff --git a/app/include/zmk/usb.h b/app/include/zmk/usb.h
+index a5e5089f..186243cb 100644
+--- a/app/include/zmk/usb.h
++++ b/app/include/zmk/usb.h
+@@ -25,3 +25,12 @@ static inline bool zmk_usb_is_powered(void) {
+     return zmk_usb_get_conn_state() != ZMK_USB_CONN_NONE;
+ }
+ bool zmk_usb_is_hid_ready(void);
++
++// Report the outcome of a USB HID report send so the dead-bus heartbeat can
++// detect a configured-but-starved device (host never drains the IN endpoint).
++void zmk_usb_report_send_result(bool ok);
++
++// Notify that the user generated input while the bus was suspended — an
++// explicit recovery/wake request (used in place of USB remote wakeup on
++// hardware that lacks it).
++void zmk_usb_user_activity_while_suspended(void);
+diff --git a/app/src/usb.c b/app/src/usb.c
+index cf76341e..157f4491 100644
+--- a/app/src/usb.c
++++ b/app/src/usb.c
+@@ -54,6 +54,183 @@ bool zmk_usb_is_hid_ready(void) {
+     return zmk_usb_get_conn_state() == ZMK_USB_CONN_HID && is_configured;
+ }
+ 
++#if IS_ENABLED(CONFIG_ZMK_USB_SUSPEND_REATTACH)
++// Boards without a USB VBUS-detect pin (e.g. the Telink B91) never observe cable
++// removal: the bus just goes idle with the data-line pull-up still asserted, and
++// a controller left in that state for hours frequently misses the bus reset when
++// a host returns (e.g. a hub is re-attached to a laptop), leaving the keyboard
++// dead until it is physically re-plugged or power-cycled.
++//
++// This is a perpetual heartbeat rather than a suspend-armed one-shot: the
++// B91's suspend condition is a pure edge latch (active->idle), so a bus that
++// stays dead after a re-attach does not reliably raise another SUSPEND event
++// to re-arm a one-shot. Each tick cycles usb_disable() -> usb_enable() (a
++// fresh attach the host sees as a new device) ONLY when the bus is provably
++// dead — status SUSPEND, or an attach the host has ignored for several quiet
++// seconds — with exponential backoff on consecutive unanswered cycles. A
++// CONFIGURED device or an enumeration in flight is never touched.
++void usb_status_cb(enum usb_dc_status_code status, const uint8_t *params);
++
++static uint32_t usb_status_events; // bumped on every status callback
++
++// Consecutive failed HID report sends while CONFIGURED. A configured device
++// whose interrupt IN endpoint is never drained is half-enumerated (observed
++// after macOS dark-wake enumerations: SET_CONFIGURATION completes but the HID
++// driver never binds) — the only recovery is a fresh attach.
++static uint32_t usb_send_failures;
++
++// True when the current/most recent suspend arrived directly from CONFIGURED —
++// a host deliberately suspending the bus (e.g. laptop sleep). Cable/hub pulls
++// glitch through an SE0 bus reset first (observed consistently on hardware),
++// so they enter suspend from RESET instead. Cleared by a real enumeration.
++static bool host_asleep;
++
++static void usb_reattach_work_cb(struct k_work *work);
++static K_WORK_DELAYABLE_DEFINE(usb_reattach_work, usb_reattach_work_cb);
++
++// Consecutive quiet ticks required before an unanswered attach is declared dead.
++// A live host answers a fresh attach with a bus reset within ~200 ms, so several
++// seconds of silence after our own attach is a reliable deadness proof — but a
++// host that is backing off after repeated disconnects needs the extra room.
++#define USB_REATTACH_QUIET_TICKS 3
++// Exponential backoff cap for consecutive unanswered cycles. Keeps a genuinely
++// dead bus refreshed (never more than this stale when a host returns) while a
++// host that is slow to re-enumerate gets ever longer windows to finish.
++#define USB_REATTACH_MAX_BACKOFF_MS 30000
++// Idle tick interval while parked in host-asleep suspend (nothing to do but
++// wait for a keypress or bus activity, so tick slowly).
++#define USB_REATTACH_ASLEEP_TICK_MS 60000
++// Minimum spacing between keypress-triggered re-attaches while suspended, so
++// held/repeating keys can't hammer the bus during a slow host wake.
++#define USB_REATTACH_USER_WAKE_HOLDOFF_MS 3000
++// Consecutive failed HID sends while CONFIGURED before the binding is declared
++// dead and re-attached (each keypress that fails all its endpoint-write
++// retries counts once).
++#define USB_REATTACH_HID_FAIL_THRESHOLD 3
++
++// Set when the user pressed a key while the bus was suspended: the one signal
++// that recovery is needed *right now* (and that waking the host is desired).
++static bool user_wake_pending;
++
++void zmk_usb_report_send_result(bool ok) {
++    if (ok) {
++        usb_send_failures = 0;
++    } else if (usb_send_failures < UINT32_MAX) {
++        usb_send_failures++;
++    }
++}
++
++void zmk_usb_user_activity_while_suspended(void) {
++    user_wake_pending = true;
++    k_work_reschedule(&usb_reattach_work, K_NO_WAIT);
++}
++
++// Uptime of the last re-attach cycle (also stamped on entering host-asleep
++// suspend, so a freshly sleeping host isn't immediately dark-woken).
++static int64_t last_cycle_at;
++
++static void usb_reattach_work_cb(struct k_work *work) {
++    static uint32_t last_events;
++    static uint32_t quiet_ticks;
++    static uint32_t unanswered_cycles;
++    static uint32_t reattach_cycles;
++
++    uint32_t events = usb_status_events;
++    uint32_t next_ms = CONFIG_ZMK_USB_SUSPEND_REATTACH_MS;
++    bool user_wake = user_wake_pending;
++
++    user_wake_pending = false;
++
++    if (events != last_events) {
++        // Bus activity since the previous tick: never interfere. This also
++        // consumes a pending user wake — if the host is already talking to
++        // us, the recovery the keypress asked for is in progress.
++        last_events = events;
++        quiet_ticks = 0;
++        if (usb_status == USB_DC_CONFIGURED) {
++            unanswered_cycles = 0;
++        }
++        k_work_reschedule(&usb_reattach_work, K_MSEC(next_ms));
++        return;
++    }
++
++    quiet_ticks++;
++
++    // A CONFIGURED device whose HID sends keep failing is half-enumerated
++    // (host never bound its HID driver — macOS dark-wake artifact); a fresh
++    // attach is the only recovery, and it is safe because the link is
++    // already broken for the user.
++    bool hid_starved = (usb_status == USB_DC_CONFIGURED &&
++                        usb_send_failures >= USB_REATTACH_HID_FAIL_THRESHOLD);
++
++    // Cycle only on a provably dead bus:
++    //  - SUSPEND: the controller's idle detector fired (no SOFs for >3 ms) and
++    //    the driver's quiet-qualified poll delivered it, or
++    //  - CONNECTED and our own attach has gone unanswered for several ticks
++    //    (a live host resets the bus within ~200 ms of seeing the pull-up).
++    // A healthy CONFIGURED device is never touched.
++    bool bus_dead = (usb_status == USB_DC_SUSPEND && quiet_ticks >= 1) ||
++                    (usb_status == USB_DC_CONNECTED && quiet_ticks >= USB_REATTACH_QUIET_TICKS);
++
++    // While the host is asleep (it suspended us from CONFIGURED), generate NO
++    // bus events at all — behave like any ordinary suspended keyboard. Timer
++    // cycling here proved harmful twice on hardware: it dark-wakes a sleeping
++    // macOS, and repeated connect events into a suspended hub can wedge the
++    // hub's upstream link until it is physically re-plugged. Recovery instead
++    // rides on the user's own keypress (below), the ISR resume path, and the
++    // HID-starvation detector.
++    int64_t since_cycle = k_uptime_get() - last_cycle_at;
++    bool asleep_hold = host_asleep;
++
++    // A keypress while suspended is an explicit, human-initiated recovery
++    // request: re-present the device immediately (also serves as the wake
++    // signal a normal keyboard would send via USB remote wakeup).
++    bool wake_now = user_wake && usb_status == USB_DC_SUSPEND &&
++                    since_cycle >= USB_REATTACH_USER_WAKE_HOLDOFF_MS;
++
++    if (hid_starved || wake_now || (bus_dead && !asleep_hold)) {
++        int disable_ret, enable_ret;
++
++        reattach_cycles++;
++        disable_ret = usb_disable();
++        k_msleep(50);
++        enable_ret = usb_enable(usb_status_cb);
++        LOG_DBG("USB re-attach cycle %u (status=%d, starved=%d, wake=%d, asleep=%d, "
++                "unanswered=%u, disable rc=%d, enable rc=%d)",
++                reattach_cycles, usb_status, hid_starved, wake_now, host_asleep,
++                unanswered_cycles, disable_ret, enable_ret);
++
++        // The cycle itself delivered CONNECTED (and possibly a transient
++        // RESET); capture the counter afterwards so our own events don't
++        // read as bus activity on the next tick.
++        last_events = usb_status_events;
++        quiet_ticks = 0;
++        usb_send_failures = 0;
++        last_cycle_at = k_uptime_get();
++
++        // Exponential backoff on consecutive unanswered cycles so repeated
++        // re-attach can never snowball into host-side enumeration backoff
++        // (observed on macOS: 1 s cycling degrades enumeration until the bus
++        // never settles). Reset when the host configures us.
++        if (unanswered_cycles < 31) {
++            unanswered_cycles++;
++        }
++        uint32_t shift = MIN(unanswered_cycles, 5);
++        next_ms = MIN((uint32_t)CONFIG_ZMK_USB_SUSPEND_REATTACH_MS << shift,
++                      (uint32_t)USB_REATTACH_MAX_BACKOFF_MS);
++    } else if (bus_dead && asleep_hold) {
++        // Parked in host-asleep suspend: nothing to do until a keypress or
++        // bus activity, so tick slowly. A keypress reschedules immediately.
++        next_ms = USB_REATTACH_ASLEEP_TICK_MS;
++    }
++
++    k_work_reschedule(&usb_reattach_work, K_MSEC(next_ms));
++}
++#else
++void zmk_usb_report_send_result(bool ok) { ARG_UNUSED(ok); }
++void zmk_usb_user_activity_while_suspended(void) {}
++#endif // CONFIG_ZMK_USB_SUSPEND_REATTACH
++
+ void usb_status_cb(enum usb_dc_status_code status, const uint8_t *params) {
+     // Start-of-frame events are too frequent and noisy to notify, and they're
+     // not used within ZMK
+@@ -65,6 +242,21 @@ void usb_status_cb(enum usb_dc_status_code status, const uint8_t *params) {
+     if (status == USB_DC_RESET) {
+         zmk_usb_hid_set_protocol(HID_PROTOCOL_REPORT);
+     }
++#endif
++#if IS_ENABLED(CONFIG_ZMK_USB_SUSPEND_REATTACH)
++    if (status == USB_DC_SUSPEND && usb_status == USB_DC_CONFIGURED) {
++        // Deliberate host suspend (laptop sleep). Sticky: transient
++        // RESUME/RESET from our own re-attach cycles must not clear it —
++        // only a completed enumeration (below) proves a live host.
++        host_asleep = true;
++        // Stamp the cycle clock so a keypress in the first seconds of the
++        // host's sleep (holdoff below) can't immediately bounce the bus.
++        last_cycle_at = k_uptime_get();
++        LOG_DBG("Suspend from configured: host asleep");
++    } else if (status == USB_DC_CONFIGURED) {
++        host_asleep = false;
++    }
++    usb_status_events++;
+ #endif
+     usb_status = status;
+     if (zmk_usb_get_conn_state() == ZMK_USB_CONN_HID) {
+@@ -72,6 +264,7 @@ void usb_status_cb(enum usb_dc_status_code status, const uint8_t *params) {
+     } else {
+         is_configured = false;
+     }
++
+     k_work_submit(&usb_status_notifier_work);
+ };
+ 
+@@ -85,6 +278,10 @@ static int zmk_usb_init(void) {
+         return -EINVAL;
+     }
+ 
++#if IS_ENABLED(CONFIG_ZMK_USB_SUSPEND_REATTACH)
++    k_work_reschedule(&usb_reattach_work, K_MSEC(CONFIG_ZMK_USB_SUSPEND_REATTACH_MS));
++#endif
++
+     return 0;
+ }
+ 
+diff --git a/app/src/usb_hid.c b/app/src/usb_hid.c
+index 9adc7db8..b4eab790 100644
+--- a/app/src/usb_hid.c
++++ b/app/src/usb_hid.c
+@@ -187,6 +187,10 @@ static const struct hid_ops ops = {
+ static int zmk_usb_hid_send_report(const uint8_t *report, size_t len) {
+     switch (zmk_usb_get_status()) {
+     case USB_DC_SUSPEND:
++        // A keypress while suspended is the user asking for the connection
++        // back: hardware without remote wakeup (B91) re-presents the device
++        // instead (see the dead-bus heartbeat).
++        zmk_usb_user_activity_while_suspended();
+         return usb_wakeup_request();
+     case USB_DC_ERROR:
+     case USB_DC_RESET:
+@@ -201,6 +205,12 @@ static int zmk_usb_hid_send_report(const uint8_t *report, size_t len) {
+             k_sem_give(&hid_sem);
+         }
+ 
++        // Feed the dead-bus heartbeat's HID-starvation detector: a device
++        // that is CONFIGURED but whose interrupt IN endpoint is never
++        // drained (host HID driver failed to bind, seen after macOS
++        // dark-wake enumerations) fails every write with -EAGAIN.
++        zmk_usb_report_send_result(err == 0);
++
+         return err;
+     }
+ }
+-- 
+2.53.0
+

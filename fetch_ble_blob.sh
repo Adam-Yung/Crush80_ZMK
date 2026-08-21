@@ -14,7 +14,22 @@ SHA256="354b2f972f4a9012a66c2015a7092591eec18f29a06ba8f50ec25bd0d3cf9a31"
 PIN="fc489d7106aa3ff748c47af255abf5f9aed88908"
 URL="https://raw.githubusercontent.com/telink-semi/zephyr_hal_telink_b91_ble_lib/${PIN}/liblt_9518_zephyr.a"
 
-if [ -f "$BLOB" ] && echo "${SHA256}  ${BLOB}" | sha256sum -c --status 2>/dev/null; then
+verify_sha256() {
+    local file="$1" expected="$2"
+    if [[ "$(uname)" == "Darwin" ]]; then
+        local actual
+        actual="$(shasum -a 256 "$file" | awk '{print $1}')"
+        [[ "$actual" == "$expected" ]]
+    elif command -v sha256sum &>/dev/null; then
+        echo "${expected}  ${file}" | sha256sum -c --status 2>/dev/null
+    else
+        local actual
+        actual="$(shasum -a 256 "$file" | awk '{print $1}')"
+        [[ "$actual" == "$expected" ]]
+    fi
+}
+
+if [ -f "$BLOB" ] && verify_sha256 "$BLOB" "$SHA256"; then
     echo "BLE blob present and verified: $BLOB"
     exit 0
 fi
@@ -23,7 +38,7 @@ echo "Fetching Telink B91 BLE blob from telink-semi (pinned ${PIN})..."
 mkdir -p "$(dirname "$BLOB")"
 curl -fsSL -o "$BLOB" "$URL"
 
-if ! echo "${SHA256}  ${BLOB}" | sha256sum -c --status; then
+if ! verify_sha256 "$BLOB" "$SHA256"; then
     echo "ERROR: SHA-256 mismatch on $BLOB — refusing to use it." >&2
     rm -f "$BLOB"
     exit 1

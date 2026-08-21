@@ -38,7 +38,7 @@ else
     exit 1
 fi
 
-export PATH="/usr/bin:/usr/local/bin:$HOME/.local/bin:$HOME/go/bin:$PATH"
+export PATH="$HOME/miniforge3/bin:$HOME/.local/bin:$HOME/go/bin:/usr/local/bin:/usr/bin:$PATH"
 # West may be installed in Python user site
 WEST_USER_BIN="$(python3 -m site --user-base 2>/dev/null)/bin"
 [[ -d "$WEST_USER_BIN" ]] && export PATH="$WEST_USER_BIN:$PATH"
@@ -54,6 +54,31 @@ echo "Syncing board files..."
 cp -r "$REPO_DIR/zmk/boards/crush80/"* "$WORKSPACE_DIR/zmk/boards/crush80/"
 cp -r "$REPO_DIR/zmk/drivers/led/"*    "$WORKSPACE_DIR/zmk/drivers/led/"
 cp -r "$REPO_DIR/zmk/dts/bindings/led/"* "$WORKSPACE_DIR/zmk/dts/bindings/led/"
+
+# Sync platform drivers (usb, bluetooth, sensor, watchdog)
+for d in usb bluetooth sensor watchdog; do
+    mkdir -p "$WORKSPACE_DIR/zmk/drivers/$d"
+    cp -r "$REPO_DIR/zmk/drivers/$d/"* "$WORKSPACE_DIR/zmk/drivers/$d/"
+done
+
+# Sync DTS bindings for platform drivers
+for d in usb bluetooth sensor watchdog; do
+    mkdir -p "$WORKSPACE_DIR/zmk/dts/bindings/$d"
+    cp -r "$REPO_DIR/zmk/dts/bindings/$d/"* "$WORKSPACE_DIR/zmk/dts/bindings/$d/"
+done
+
+# Sync module root files (CMakeLists.txt, Kconfig, module.yml, src/, include/)
+cp "$REPO_DIR/zmk/CMakeLists.txt" "$WORKSPACE_DIR/zmk/"
+cp "$REPO_DIR/zmk/Kconfig" "$WORKSPACE_DIR/zmk/"
+mkdir -p "$WORKSPACE_DIR/zmk/zephyr"
+cp "$REPO_DIR/zmk/zephyr/module.yml" "$WORKSPACE_DIR/zmk/zephyr/"
+mkdir -p "$WORKSPACE_DIR/zmk/src" "$WORKSPACE_DIR/zmk/include"
+cp "$REPO_DIR/zmk/src/"* "$WORKSPACE_DIR/zmk/src/" 2>/dev/null || true
+cp "$REPO_DIR/zmk/include/"* "$WORKSPACE_DIR/zmk/include/" 2>/dev/null || true
+
+# Sync conf files
+cp "$REPO_DIR/conf/"* "$WORKSPACE_DIR/conf/"
+
 echo "  Done."
 
 cd "$WORKSPACE_DIR"
@@ -64,7 +89,7 @@ OVERLAY="$WORKSPACE_DIR/conf/mcumgr.overlay"
 # Crush 80 specific overrides:
 #   app.conf already sets CONFIG_ZMK_KEYBOARD_NAME but this override
 #   ensures the name is correct even if app.conf is not the primary conf.
-OVERRIDE_CONF="$(mktemp /tmp/crush80_override.XXXXXX.conf)"
+OVERRIDE_CONF="$(mktemp /tmp/crush80_override_XXXXXX)"
 cat > "$OVERRIDE_CONF" << 'EOF'
 CONFIG_ZMK_KEYBOARD_NAME="Crush 80"
 EOF
@@ -81,7 +106,8 @@ if [ "$SKIP_MCUBOOT" = false ]; then
         -- \
         -DEXTRA_CONF_FILE="$WORKSPACE_DIR/conf/mcuboot.conf" \
         -DDTC_OVERLAY_FILE="$WORKSPACE_DIR/conf/mcuboot.overlay" \
-        -DBOARD_ROOT="$WORKSPACE_DIR/zmk"
+        -DBOARD_ROOT="$WORKSPACE_DIR/zmk" \
+        -DDTS_ROOT="$WORKSPACE_DIR/zmk"
     echo "  MCUboot: OK"
 fi
 
@@ -90,7 +116,7 @@ if [ "$SKIP_BRIDGE" = false ]; then
     echo ""
     echo "[2/3] Building OTA bridge..."
     # Bridge uses only ota-bridge.conf — NOT app.conf (which enables MCUboot)
-    BRIDGE_OVERRIDE="$(mktemp /tmp/crush80_bridge.XXXXXX.conf)"
+    BRIDGE_OVERRIDE="$(mktemp /tmp/crush80_bridge_XXXXXX)"
     printf 'CONFIG_ZMK_KEYBOARD_NAME="Crush 80 Bridge"\n' > "$BRIDGE_OVERRIDE"
     west build \
         -s zmk-src/app \
@@ -100,7 +126,8 @@ if [ "$SKIP_BRIDGE" = false ]; then
         -- \
         -DEXTRA_CONF_FILE="$WORKSPACE_DIR/conf/ota-bridge.conf;$BRIDGE_OVERRIDE" \
         -DDTC_OVERLAY_FILE="$OVERLAY" \
-        -DBOARD_ROOT="$WORKSPACE_DIR/zmk"
+        -DBOARD_ROOT="$WORKSPACE_DIR/zmk" \
+        -DDTS_ROOT="$WORKSPACE_DIR/zmk"
     rm -f "$BRIDGE_OVERRIDE"
     echo "  OTA bridge: OK"
 fi
@@ -116,7 +143,8 @@ west build \
     -- \
     -DEXTRA_CONF_FILE="$CONF;$OVERRIDE_CONF" \
     -DDTC_OVERLAY_FILE="$OVERLAY" \
-    -DBOARD_ROOT="$WORKSPACE_DIR/zmk"
+    -DBOARD_ROOT="$WORKSPACE_DIR/zmk" \
+    -DDTS_ROOT="$WORKSPACE_DIR/zmk"
 echo "  ZMK app: OK"
 
 rm -f "$OVERRIDE_CONF"

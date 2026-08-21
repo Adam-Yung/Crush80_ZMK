@@ -1,0 +1,7 @@
+name: crush80-zmk
+build:
+  cmake: .
+  kconfig: Kconfig
+  settings:
+    board_root: .
+    dts_root: .

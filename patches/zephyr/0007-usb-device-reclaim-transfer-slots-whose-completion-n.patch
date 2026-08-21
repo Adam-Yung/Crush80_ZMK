@@ -1,0 +1,150 @@
+From acb3a694a6d85f920d2b07fc6aefa7123c57f670 Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Fri, 24 Jul 2026 17:52:53 -0700
+Subject: [PATCH] usb: device: reclaim transfer slots whose completion never
+ runs
+
+Completes the fix begun in patch 0004. A canceled transfer whose k_work
+submission is refused (queue tearing down during usb_disable(), or the
+item already mid-cancel) keeps status = -ECANCELED with no pending work
+and its semaphore never given: the slot can never be allocated again,
+and usb_ep_get_transfer() keeps matching it, so that endpoint stays
+blocked forever. Hardware capture (Telink B91, CDC-ACM+HID composite)
+showed exactly that state on the CDC bulk IN endpoint.
+
+- usb_cancel_transfer()/usb_cancel_transfers(): if the completion cannot
+  be queued, finalize the slot inline instead of leaking it.
+- usb_transfer(): reclaim slots stranded in a terminal status with no
+  pending completion before deciding the endpoint is busy.
+
+Signed-off-by: Micheal Waltz <micheal@ecliptik.com>
+---
+ subsys/usb/device/usb_transfer.c | 84 ++++++++++++++++++++++++++------
+ 1 file changed, 68 insertions(+), 16 deletions(-)
+
+diff --git a/subsys/usb/device/usb_transfer.c b/subsys/usb/device/usb_transfer.c
+index 77d60a3d4..47b4111b2 100644
+--- a/subsys/usb/device/usb_transfer.c
++++ b/subsys/usb/device/usb_transfer.c
+@@ -68,6 +68,41 @@ bool usb_transfer_is_busy(uint8_t ep)
+ 	return false;
+ }
+ 
++/*
++ * Reclaim slots stranded in a terminal status whose deferred completion will
++ * never run.  Observed on hardware: a canceled transfer whose k_work could
++ * not be queued (the queue was tearing down during usb_disable(), or the item
++ * was already mid-cancel) keeps status = -ECANCELED with no pending work and
++ * its semaphore never given.  Such a slot is lost for good — it can never be
++ * allocated again, and usb_ep_get_transfer() keeps matching it, so the
++ * endpoint itself stays blocked.  Repeat over a few enumeration cycles and
++ * the whole pool is gone.
++ *
++ * Must be called with interrupts locked.
++ */
++static void usb_transfer_reclaim_stale(uint8_t ep)
++{
++	for (size_t i = 0; i < ARRAY_SIZE(ut_data); i++) {
++		struct usb_transfer_data *trans = &ut_data[i];
++
++		if (trans->ep != ep || trans->status == 0 ||
++		    trans->status == -EBUSY) {
++			continue;
++		}
++
++		if (k_work_busy_get(&trans->work) != 0) {
++			/* Completion still pending — it will finalize. */
++			continue;
++		}
++
++		LOG_WRN("Reclaiming stranded transfer, ep 0x%02x status %d",
++			ep, trans->status);
++		trans->cb = NULL;
++		trans->status = 0;
++		k_sem_give(&trans->sem);
++	}
++}
++
+ static void usb_transfer_work(struct k_work *item)
+ {
+ 	struct usb_transfer_data *trans;
+@@ -222,18 +257,15 @@ int usb_transfer(uint8_t ep, uint8_t *data, size_t dlen, unsigned int flags,
+ 
+ 	key = irq_lock();
+ 
+-	/* Enforce one transfer per endpoint across ALL slots.  The pre-check
+-	 * above only rejects -EBUSY; a canceled transfer whose deferred
+-	 * completion has not yet drained (-ECANCELED, semaphore still held)
+-	 * must also block new submissions — otherwise a second transfer gets
+-	 * banked on the same endpoint, and whichever sits at the higher slot
+-	 * index is shadowed by usb_ep_get_transfer() and leaks its slot
+-	 * permanently.  Enough reset/reconfigure churn (e.g. macOS dark-wake
+-	 * re-enumerations) then exhausts the pool and every subsequent
+-	 * usb_transfer() fails with -ENOMEM until reboot.  The rejected
+-	 * caller loses nothing: the pending completion's callback re-submits
+-	 * once the cancel drains.
+-	 */
++	/* Free anything stranded on this endpoint by a lost completion before
++	 * deciding whether it is busy, so a dead slot cannot block the
++	 * endpoint forever. */
++	usb_transfer_reclaim_stale(ep);
++
++	/* One transfer per endpoint, re-checked under the lock: only a LIVE
++	 * transfer blocks.  (A terminal-status slot with its completion still
++	 * pending also blocks — usb_ep_get_transfer() would shadow the new
++	 * transfer behind it — but it will drain on its own.) */
+ 	if (usb_ep_get_transfer(ep)) {
+ 		ret = -EBUSY;
+ 		goto done;
+@@ -302,6 +334,28 @@ size_t usb_transfer_slots_snapshot(uint8_t *eps, int8_t *statuses,
+ 	return n;
+ }
+ 
++/*
++ * Mark a live transfer canceled and hand it to the workqueue for completion.
++ * If the submission is refused (queue tearing down, item already mid-cancel)
++ * the completion would never run, so finalize the slot inline instead of
++ * leaking it — see usb_transfer_reclaim_stale().  The class callback is
++ * deliberately not invoked on that path: it only happens while the device is
++ * being torn down, where restarting a transfer is wrong; the class restarts
++ * from its own CONFIGURED handling on the next enumeration.
++ */
++static void usb_transfer_cancel_one(struct usb_transfer_data *trans)
++{
++	trans->status = -ECANCELED;
++
++	if (k_work_submit_to_queue(&USB_WORK_Q, &trans->work) < 0) {
++		LOG_WRN("Cancel completion not queued, ep 0x%02x; finalizing",
++			trans->ep);
++		trans->cb = NULL;
++		trans->status = 0;
++		k_sem_give(&trans->sem);
++	}
++}
++
+ void usb_cancel_transfer(uint8_t ep)
+ {
+ 	struct usb_transfer_data *trans;
+@@ -318,8 +372,7 @@ void usb_cancel_transfer(uint8_t ep)
+ 		goto done;
+ 	}
+ 
+-	trans->status = -ECANCELED;
+-	k_work_submit_to_queue(&USB_WORK_Q, &trans->work);
++	usb_transfer_cancel_one(trans);
+ 
+ done:
+ 	irq_unlock(key);
+@@ -334,8 +387,7 @@ void usb_cancel_transfers(void)
+ 		key = irq_lock();
+ 
+ 		if (trans->status == -EBUSY) {
+-			trans->status = -ECANCELED;
+-			k_work_submit_to_queue(&USB_WORK_Q, &trans->work);
++			usb_transfer_cancel_one(trans);
+ 			LOG_DBG("Cancel transfer for ep: 0x%02x", trans->ep);
+ 		}
+ 
+-- 
+2.53.0
+

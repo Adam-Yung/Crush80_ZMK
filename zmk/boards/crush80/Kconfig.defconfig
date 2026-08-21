@@ -6,6 +6,7 @@ config SOC_FLASH_TELINK_B91
 	default y if FLASH
 
 config WDT_B91
+	bool
 	default y
 	depends on WDT
 

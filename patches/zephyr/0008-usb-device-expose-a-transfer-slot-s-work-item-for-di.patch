@@ -1,0 +1,46 @@
+From f91952805c80409c1491d2708713b264fa8f5862 Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Fri, 24 Jul 2026 17:58:26 -0700
+Subject: [PATCH] usb: device: expose a transfer slot's work item for
+ diagnostics
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Lets an out-of-band watchdog inspect the raw k_work state (flags, owning
+queue, pending-list membership) of a transfer whose completion appears
+never to run — the state every captured CDC wedge ends in on Telink B91.
+
+Signed-off-by: Micheal Waltz <micheal@ecliptik.com>
+---
+ subsys/usb/device/usb_transfer.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/subsys/usb/device/usb_transfer.c b/subsys/usb/device/usb_transfer.c
+index 47b4111b2..0e24995d2 100644
+--- a/subsys/usb/device/usb_transfer.c
++++ b/subsys/usb/device/usb_transfer.c
+@@ -334,6 +334,20 @@ size_t usb_transfer_slots_snapshot(uint8_t *eps, int8_t *statuses,
+ 	return n;
+ }
+ 
++/*
++ * Diagnostic access to a slot's work item, so an out-of-band watchdog can
++ * inspect the raw k_work state (flags, owning queue, list membership) of a
++ * transfer whose completion appears never to run.
++ */
++struct k_work *usb_transfer_slot_work(size_t idx)
++{
++	if (idx >= ARRAY_SIZE(ut_data)) {
++		return NULL;
++	}
++
++	return &ut_data[idx].work;
++}
++
+ /*
+  * Mark a live transfer canceled and hand it to the workqueue for completion.
+  * If the submission is refused (queue tearing down, item already mid-cancel)
+-- 
+2.53.0
+

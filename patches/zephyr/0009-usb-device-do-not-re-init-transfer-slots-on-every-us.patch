@@ -1,0 +1,89 @@
+From 99f53e8f7ad77a5be374fdfa019f972c4f73b1e9 Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Fri, 24 Jul 2026 18:20:32 -0700
+Subject: [PATCH] usb: device: do not re-init transfer slots on every
+ usb_enable()
+
+usb_enable() calls usb_transfer_init() unconditionally, and that ran
+k_work_init() + k_sem_init() over every transfer slot. k_work_init()
+overwrites the whole k_work, list node included, and a work item can
+still be linked in the workqueue's pending list at that point:
+usb_disable() submits the cancel completions and nothing drains them
+before usb_enable() runs again.
+
+Zeroing a linked node and appending it later sets node->next = NULL
+mid-list, truncating the pending list and orphaning every item behind
+it. Orphaned items keep K_WORK_QUEUED_BIT set while being unreachable
+from the list head, so the queue can never run them and every later
+k_work_submit() for them is a no-op ('already queued'). Their transfers
+never complete, their slots never return to the pool, and
+usb_ep_get_transfer() keeps matching them, so those endpoints stay
+blocked until reboot. Re-initializing the semaphores is unsound for the
+same reason: a slot still in use is handed to a second owner.
+
+Symptom on hardware (Telink B91, CDC-ACM + HID composite): after USB
+re-attach churn the CDC ACM console goes dead in both directions while
+HID keeps working and the host still sees a healthy configured device;
+the state survives physical re-enumeration and only a power cycle clears
+it. Captured with an out-of-band watchdog: the stranded work items were
+flagged queued, pointed at the live USB workqueue, and were absent from
+its pending list.
+
+Initialize the slots once. Verified by 20 usb_disable()/usb_enable()
+cycles racing live SMP traffic, which reproduced the wedge 100% of the
+time before this change and 0/20 after.
+
+Signed-off-by: Micheal Waltz <micheal@ecliptik.com>
+---
+ subsys/usb/device/usb_transfer.c | 29 ++++++++++++++++++++++++++++-
+ 1 file changed, 28 insertions(+), 1 deletion(-)
+
+diff --git a/subsys/usb/device/usb_transfer.c b/subsys/usb/device/usb_transfer.c
+index 0e24995d2..1013c01e9 100644
+--- a/subsys/usb/device/usb_transfer.c
++++ b/subsys/usb/device/usb_transfer.c
+@@ -435,13 +435,40 @@ int usb_transfer_sync(uint8_t ep, uint8_t *data, size_t dlen, unsigned int flags
+ 	return pdata.tsize;
+ }
+ 
+-/* Init transfer slots */
++/* Init transfer slots.
++ *
++ * usb_enable() calls this on every enable, but the slots' kernel objects must
++ * only ever be initialized ONCE.  k_work_init() overwrites the whole k_work,
++ * including its list node, and a work item can still be linked in the
++ * workqueue's pending list here: usb_disable() submits the cancel completions
++ * and nothing drains them before usb_enable() runs again.  Zeroing a linked
++ * node, then appending it later, sets node->next = NULL mid-list — truncating
++ * the pending list and orphaning every item behind it.  Those items keep
++ * K_WORK_QUEUED_BIT set while being unreachable from the list head, so the
++ * queue can never run them and every later k_work_submit() for them is a
++ * no-op: their transfers never complete, their slots never return to the pool
++ * and their endpoints stay blocked until reboot.  Re-initializing the
++ * semaphores is equally unsound — it can hand a slot that is still in use to
++ * a second owner.
++ *
++ * Observed on hardware as a CDC ACM console dead in both directions (HID
++ * unaffected) after USB re-attach churn, surviving re-enumeration, with the
++ * stranded work items flagged queued but absent from the queue's list.
++ */
+ int usb_transfer_init(void)
+ {
++	static bool initialized;
++
++	if (initialized) {
++		return 0;
++	}
++
+ 	for (size_t i = 0; i < ARRAY_SIZE(ut_data); i++) {
+ 		k_work_init(&ut_data[i].work, usb_transfer_work);
+ 		k_sem_init(&ut_data[i].sem, 1, 1);
+ 	}
+ 
++	initialized = true;
++
+ 	return 0;
+ }
+-- 
+2.53.0
+
