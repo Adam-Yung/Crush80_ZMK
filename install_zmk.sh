@@ -36,12 +36,20 @@ header() { echo -e "\n${BOLD}$*${NC}"; }
 # ── Defaults ─────────────────────────────────────────────────
 BRIDGE_IMAGE="dist/crush80-ota-bridge.bin"
 ZMK_IMAGE="dist/crush80-zmk-app.signed.bin"
-SERIAL_PORT="${SERIAL_PORT:-/dev/ttyACM0}"
 STOCK_VID="320f"
 STOCK_PID="5055"
 ZMK_VID="1d50"
 ZMK_PID="615e"
 AUTO_YES=0
+
+# Serial port: platform-aware default
+if [[ -n "${SERIAL_PORT:-}" ]]; then
+    :
+elif [[ "$(uname)" == "Darwin" ]]; then
+    SERIAL_PORT=""  # auto-detect below
+else
+    SERIAL_PORT="/dev/ttyACM0"
+fi
 
 # ── Parse arguments ──────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -51,7 +59,8 @@ while [[ $# -gt 0 ]]; do
         --port)      SERIAL_PORT="$2"; shift 2 ;;
         -y|--yes)    AUTO_YES=1; shift ;;
         --help|-h)
-            echo "Usage: $0 [-y] [--bridge OTA_IMAGE] [--zmk ZMK_SIGNED_IMAGE] [--port /dev/ttyACMx]"
+            echo "Usage: $0 [-y] [--bridge OTA_IMAGE] [--zmk ZMK_SIGNED_IMAGE] [--port SERIAL_PORT]"
+            echo "  SERIAL_PORT: /dev/ttyACM0 (Linux) or /dev/cu.usbmodemXXXX (macOS)"
             exit 0 ;;
         *) die "Unknown option: $1" ;;
     esac
@@ -66,7 +75,15 @@ MCUMGR="${MCUMGR:-$(command -v mcumgr 2>/dev/null || echo "$HOME/go/bin/mcumgr")
 [[ -x "$MCUMGR" ]] || die "mcumgr not found. Install: go install github.com/apache/mynewt-mcumgr-cli/mcumgr@latest"
 
 check_usb() {
-    lsusb -d "$1:$2" >/dev/null 2>&1
+    local vid="$1" pid="$2"
+    if command -v lsusb &>/dev/null; then
+        lsusb -d "$vid:$pid" >/dev/null 2>&1
+    elif [[ "$(uname)" == "Darwin" ]]; then
+        # macOS: use system_profiler to check for USB device
+        system_profiler SPUSBDataType 2>/dev/null | grep -qi "0x${vid}.*0x${pid}" 2>/dev/null
+    else
+        return 1
+    fi
 }
 
 wait_for_usb() {
@@ -85,17 +102,48 @@ wait_for_usb() {
 
 wait_for_serial() {
     local port="$1" timeout="${2:-15}"
-    info "Waiting for serial port $port..."
-    local elapsed=0
-    while [[ ! -e "$port" ]]; do
-        sleep 1
-        elapsed=$((elapsed + 1))
-        if [[ $elapsed -ge $timeout ]]; then
-            die "Timeout waiting for $port after ${timeout}s"
+    # If port is empty, try to auto-detect
+    if [[ -z "$port" ]]; then
+        info "Auto-detecting serial port..."
+        port="$(find_serial_port)"
+        if [[ -z "$port" ]]; then
+            info "Waiting for serial device to appear..."
+            local elapsed=0
+            while [[ -z "$port" ]]; do
+                sleep 1
+                elapsed=$((elapsed + 1))
+                port="$(find_serial_port)"
+                if [[ $elapsed -ge $timeout ]]; then
+                    die "Timeout: no serial port found after ${timeout}s"
+                fi
+            done
         fi
-    done
+        SERIAL_PORT="$port"
+    else
+        info "Waiting for serial port $port..."
+        local elapsed=0
+        while [[ ! -e "$port" ]]; do
+            sleep 1
+            elapsed=$((elapsed + 1))
+            if [[ $elapsed -ge $timeout ]]; then
+                die "Timeout waiting for $port after ${timeout}s"
+            fi
+        done
+    fi
     sleep 2
-    ok "Serial port ready"
+    ok "Serial port ready: $SERIAL_PORT"
+}
+
+find_serial_port() {
+    # Linux: /dev/ttyACM*
+    for dev in /dev/ttyACM0 /dev/ttyACM1 /dev/ttyUSB0; do
+        if [[ -e "$dev" ]]; then echo "$dev"; return 0; fi
+    done
+    # macOS: /dev/cu.usbmodem*
+    for dev in /dev/cu.usbmodem*; do
+        if [[ -e "$dev" ]]; then echo "$dev"; return 0; fi
+    done
+    echo ""
 }
 
 # ── Recovery guidance on failure ─────────────────────────────

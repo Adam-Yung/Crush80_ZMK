@@ -1,11 +1,13 @@
 #!/bin/bash
 # Flash Wobkey Crush 80 ZMK firmware.
-# Run from repo root in WSL: bash flash.sh
+# Run from repo root: bash flash.sh
+#
+# Supported platforms: Linux, macOS, Windows (WSL)
 #
 # Prerequisites:
 #   - Keyboard plugged in via USB-C, in USB mode (not BT/2.4G)
 #   - Build artifacts in dist/  (run bash build.sh first)
-#   - udev rules installed:
+#   - Linux: udev rules installed:
 #       sudo cp docs/99-wobkey-crush80.rules /etc/udev/rules.d/
 #       sudo udevadm control --reload
 #
@@ -38,7 +40,15 @@ fi
 
 # ── Helper: find the keyboard serial port ────────────────────────────────────
 find_serial_port() {
+    # Linux: /dev/ttyACM*
     for dev in /dev/ttyACM0 /dev/ttyACM1 /dev/ttyUSB0; do
+        if [ -e "$dev" ]; then
+            echo "$dev"
+            return 0
+        fi
+    done
+    # macOS: /dev/cu.usbmodem*
+    for dev in /dev/cu.usbmodem*; do
         if [ -e "$dev" ]; then
             echo "$dev"
             return 0
@@ -85,8 +95,13 @@ if [ "$STAGE" = "all" ] || [ "$STAGE" = "stage2" ]; then
     PORT="$(find_serial_port)"
     if [ -z "$PORT" ]; then
         echo "ERROR: No serial device found."
-        echo "  The keyboard should appear as /dev/ttyACM0 after Stage 1."
-        echo "  Check: ls /dev/ttyACM*"
+        if [ "$(uname)" = "Darwin" ]; then
+            echo "  The keyboard should appear as /dev/cu.usbmodem* after Stage 1."
+            echo "  Check: ls /dev/cu.usbmodem*"
+        else
+            echo "  The keyboard should appear as /dev/ttyACM0 after Stage 1."
+            echo "  Check: ls /dev/ttyACM*"
+        fi
         exit 1
     fi
     echo "  Found keyboard at $PORT"
