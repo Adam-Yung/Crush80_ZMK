@@ -273,6 +273,7 @@
 		 * Layer 2: Nav (hold W)
 		 * Right hand: IJKL arrows, U=Bspc, O=Del, ;=Shift+Enter
 		 * Left hand: editing (Undo/Cut/Copy/Paste), E=Home, R=End, T/A/S=Shift
+		 * G = Caps Word (auto-deactivates on space/punctuation)
 		 */
 		nav_layer {
 			display-name = "Nav";
@@ -292,9 +293,9 @@
 				&kp LSHFT     &none         &kp BSPC      &kp UP        &kp DEL
 				&none         &none         &none         &none
 				&none         &none         &none
-				/* Row 3: _, Shift, Shift, _, _, _, _, Left, Down, Right, Shift+Enter */
+				/* Row 3: _, Shift, Shift, _, _, CapsWord, _, Left, Down, Right, Shift+Enter */
 				&none         &kp LSHFT     &kp LSHFT     &none         &none
-				&none         &none         &kp LEFT      &kp DOWN      &kp RIGHT
+				&caps_word    &none         &kp LEFT      &kp DOWN      &kp RIGHT
 				&kp LS(RET)   &none                       &kp RET
 				/* Row 4: Shift, Undo, Cut, Copy, Paste, _, _, _, SelLine, SelWord */
 				&kp LSHFT                   &kp LC(Z)     &kp LC(X)     &kp LC(C)
