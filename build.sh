@@ -1,6 +1,7 @@
 #!/bin/bash
 # Build all Wobkey Crush 80 ZMK firmware targets.
-# Run from repo root in WSL: bash build.sh
+# Run from repo root: bash build.sh
+# Supports macOS and Linux.
 #
 # Outputs go to dist/ (gitignored):
 #   dist/crush80-ota-bridge.bin    ← flash first via flash_ota.py
@@ -37,7 +38,11 @@ else
     exit 1
 fi
 
-export PATH="/usr/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
+export PATH="/usr/bin:/usr/local/bin:$HOME/.local/bin:$HOME/go/bin:$PATH"
+# West may be installed in Python user site
+WEST_USER_BIN="$(python3 -m site --user-base 2>/dev/null)/bin"
+[[ -d "$WEST_USER_BIN" ]] && export PATH="$WEST_USER_BIN:$PATH"
+
 export ZEPHYR_SDK_INSTALL_DIR="$HOME/zephyr-sdk-0.17.0"
 
 echo "Workspace: $WORKSPACE_DIR"
