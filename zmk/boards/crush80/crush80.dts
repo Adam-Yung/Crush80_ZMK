@@ -257,26 +257,26 @@
 		wakeup-source;
 
 		col-gpios
-			= <&gpioe 4 GPIO_ACTIVE_LOW>
+			= <&gpioe 0 GPIO_ACTIVE_LOW>
+			, <&gpioe 1 GPIO_ACTIVE_LOW>
+			, <&gpioe 2 GPIO_ACTIVE_LOW>
+			, <&gpioe 4 GPIO_ACTIVE_LOW>
 			, <&gpioe 5 GPIO_ACTIVE_LOW>
 			, <&gpioe 6 GPIO_ACTIVE_LOW>
-			, <&gpioe 7 GPIO_ACTIVE_LOW>
-			, <&gpioa 0 GPIO_ACTIVE_LOW>
-			, <&gpioa 1 GPIO_ACTIVE_LOW>
-			, <&gpioa 2 GPIO_ACTIVE_LOW>
-			, <&gpioa 3 GPIO_ACTIVE_LOW>
-			, <&gpioa 4 GPIO_ACTIVE_LOW>
+			, <&gpiob 0 GPIO_ACTIVE_LOW>
 			, <&gpiob 1 GPIO_ACTIVE_LOW>
 			, <&gpiob 2 GPIO_ACTIVE_LOW>
 			, <&gpiob 3 GPIO_ACTIVE_LOW>
 			, <&gpiob 4 GPIO_ACTIVE_LOW>
 			, <&gpiob 5 GPIO_ACTIVE_LOW>
 			, <&gpiob 6 GPIO_ACTIVE_LOW>
+			, <&gpioc 0 GPIO_ACTIVE_LOW>
 			, <&gpioc 1 GPIO_ACTIVE_LOW>
+			, <&gpioc 4 GPIO_ACTIVE_LOW>
 			;
 
 		row-gpios
-			= <&gpioe 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>
+			= <&gpiod 7 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>
 			, <&gpiod 2 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>
 			, <&gpiod 3 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>
 			, <&gpiod 4 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>
@@ -374,10 +374,10 @@
  * 0x45 = clock divider suggests ~1 MHz. Start at 1 MHz, increase if stable.
  */
 &pinctrl {
+	/* pad-mul-sel = 1: required for B91 GPIO pin routing. Same as Rainy 75. */
 	pad-mul-sel = <1>;
 
-	/* HSPI: CLK(PE1), MOSI(PE2) — FUNC_C alternate function.
-	 * PE0 used as manual GPIO CS, not hardware HSPI CS pin. */
+	/* HSPI pinctrl kept for reference but HSPI node is disabled */
 	hspi_clk_pe1_default: hspi_clk_pe1_default {
 		pinmux = <B91_PINMUX_SET(B91_PORT_E, B91_PIN_1, B91_FUNC_C)>;
 	};
@@ -386,36 +386,14 @@
 	};
 };
 
+/*
+ * HSPI disabled: PE0 is needed for kscan row 0 (F-row).
+ * The AW20216S LED driver doesn't have a working ZMK driver yet anyway.
+ * Re-enable once an AW20216S driver is implemented AND row 0 is moved
+ * to a different GPIO (or CS is moved to a non-row pin).
+ */
 &hspi {
-	status = "okay";
-	peripheral-id = "HSPI_MODULE";
-	cs0-pin = "0";
-	cs1-pin = "0";
-	cs2-pin = "0";
-	pinctrl-0 = <&hspi_clk_pe1_default &hspi_mosi_pe2_default>;
-	pinctrl-names = "default";
-	/* Manual GPIO CS — Zephyr SPI framework handles these automatically */
-	cs-gpios = <&gpioe 0 GPIO_ACTIVE_LOW>,   /* PE0 = CS chip 0 [CONFIRMED] */
-	           <&gpioc 0 GPIO_ACTIVE_LOW>;   /* PC0 = CS chip 1 [CONFIRMED] */
-
-	aw20216s0: aw20216s@0 {
-		compatible = "wobkey,aw20216s";
-		reg = <0>;
-		spi-max-frequency = <1000000>;
-		num-leds = <108>;
-		global-current = <32>;
-		enable-gpios = <&gpioc 2 GPIO_ACTIVE_HIGH>;  /* PC2 = LED power [CONFIRMED] */
-		status = "okay";
-	};
-
-	aw20216s1: aw20216s@1 {
-		compatible = "wobkey,aw20216s";
-		reg = <1>;
-		spi-max-frequency = <1000000>;
-		num-leds = <46>;
-		global-current = <32>;
-		status = "okay";
-	};
+	status = "disabled";
 };
 
 &gpioa { status = "okay"; };

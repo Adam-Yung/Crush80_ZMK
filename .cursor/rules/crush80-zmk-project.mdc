@@ -1,0 +1,46 @@
+---
+description: Crush80 ZMK firmware project conventions and build workflow
+globs:
+  - "zmk/**"
+  - "conf/**"
+  - "build.sh"
+  - "flash.sh"
+  - "scripts/**"
+alwaysApply: false
+---
+
+# Crush 80 ZMK Project
+
+## Build & Flash
+- Build: `bash build.sh --skip-bridge --skip-mcuboot`
+- Flash: `bash flash.sh` (or `bash flash.sh --build` for build+flash)
+- Recovery: `python3 scripts/recovery_flash.py` (unplug/replug race)
+
+## Critical Safety Rules
+1. NEVER set `CONFIG_LOG_DEFAULT_LEVEL=4` — floods serial, bricks SMP
+2. NEVER enable HSPI (`&hspi { status = "okay" }`) — PE0/PE1/PE2 are matrix columns
+3. Always confirm after flash: `mcumgr image confirm ""`
+4. If SMP times out after flash, use recovery_flash.py (unplug/replug)
+
+## Architecture
+- MCUboot at 0x0, ZMK app at 0x10000, slot 1 at 0x80000
+- Flash via MCUboot swap: upload → test hash → reset → wait 12s → confirm
+- Serial port: /dev/cu.usbmodem1101 at 115200 baud
+- mcumgr CLI: ~/go/bin/mcumgr
+
+## GPIO Pin Assignments (CONFIRMED from original firmware binary)
+- Columns (0-15): PE0, PE1, PE2, PE4, PE5, PE6, PB0, PB1, PB2, PB3, PB4, PB5, PB6, PC0, PC1, PC4
+- Rows (0-5): PD7, PD2, PD3, PD4, PD5, PD6
+- Source: Ghidra analysis of FUN_ram_0001a140 calls at offset 0xF078-0xF188
+
+## Keymap Config
+- Source of truth: ~/.config/DOTFILES/keybindings/crush80-zmk/
+- build.sh syncs from dotfiles into repo before building
+- Edit keymap there, then just run `bash flash.sh --build`
+
+## Debugging
+- Test SMP: `~/go/bin/mcumgr --conntype serial --connstring "dev=/dev/cu.usbmodem1101,baud=115200" echo hello`
+- Check image: `mcumgr image list`
+- Reset: `mcumgr reset`
+- For kscan debugging, use CONFIG_ZMK_LOG_LEVEL_DBG=y (NOT LOG_DEFAULT_LEVEL=4)
+- Read serial logs: open port with DTR=True via pyserial
