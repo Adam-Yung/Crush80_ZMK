@@ -28,8 +28,19 @@ for arg in "$@"; do
 done
 
 # ── Sync keymap config from dotfiles ────────────────────────────────────────
-DOTFILES_ZMK="$HOME/.config/DOTFILES/keybindings/crush80-zmk"
-if [ -d "$DOTFILES_ZMK" ]; then
+DOTFILES_ZMK="${CRUSH80_ZMK_CONFIG:-$HOME/.config/DOTFILES/keybindings/crush80-zmk}"
+if [ ! -d "$DOTFILES_ZMK" ]; then
+    echo "ZMK config directory not found: $DOTFILES_ZMK"
+    echo "Set CRUSH80_ZMK_CONFIG to your config directory, or press Enter to skip."
+    read -rp "Config path (blank to skip): " user_path
+    if [ -n "$user_path" ] && [ -d "$user_path" ]; then
+        DOTFILES_ZMK="$user_path"
+    else
+        echo "  Skipping config sync (using repo defaults)."
+        DOTFILES_ZMK=""
+    fi
+fi
+if [ -n "$DOTFILES_ZMK" ] && [ -d "$DOTFILES_ZMK" ]; then
     echo "Syncing config from $DOTFILES_ZMK..."
     [ -f "$DOTFILES_ZMK/crush80.keymap" ] && cp "$DOTFILES_ZMK/crush80.keymap" "$REPO_DIR/zmk/boards/crush80/crush80.keymap"
     [ -f "$DOTFILES_ZMK/app.conf" ] && cp "$DOTFILES_ZMK/app.conf" "$REPO_DIR/conf/app.conf"

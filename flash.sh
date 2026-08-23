@@ -1,13 +1,45 @@
 #!/bin/bash
 # Flash Crush 80 ZMK firmware via mcumgr
 # Usage: bash flash.sh [--build] [--skip-confirm]
+#
+# Environment variables (all optional, with sensible defaults):
+#   CRUSH80_PORT       Serial port (default: /dev/cu.usbmodem1101)
+#   CRUSH80_MCUMGR    Path to mcumgr binary (default: ~/go/bin/mcumgr)
+#   CRUSH80_ZMK_CONFIG  ZMK config dir (used by build.sh if --build)
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 DIST="$REPO_DIR/dist"
-PORT="/dev/cu.usbmodem1101"
-MCUMGR="$HOME/go/bin/mcumgr"
+PORT="${CRUSH80_PORT:-/dev/cu.usbmodem1101}"
+MCUMGR="${CRUSH80_MCUMGR:-$HOME/go/bin/mcumgr}"
 CONN="dev=$PORT,baud=115200"
+
+# Validate mcumgr exists
+if [ ! -x "$MCUMGR" ]; then
+    echo "ERROR: mcumgr not found at $MCUMGR"
+    echo "Set CRUSH80_MCUMGR or install: go install github.com/apache/mynewt-mcumgr-cli/mcumgr@latest"
+    exit 1
+fi
+
+# Auto-detect serial port if default doesn't exist
+if [ ! -e "$PORT" ]; then
+    DETECTED=$(python3 -c "import glob; p=glob.glob('/dev/cu.usbmodem*'); print(p[0] if p else '')" 2>/dev/null || true)
+    if [ -n "$DETECTED" ]; then
+        PORT="$DETECTED"
+        CONN="dev=$PORT,baud=115200"
+        echo "Auto-detected port: $PORT"
+    else
+        echo "ERROR: Keyboard not found at $PORT"
+        read -rp "Enter serial port path (or plug in keyboard and retry): " user_port
+        if [ -n "$user_port" ] && [ -e "$user_port" ]; then
+            PORT="$user_port"
+            CONN="dev=$PORT,baud=115200"
+        else
+            echo "No valid port. Exiting."
+            exit 1
+        fi
+    fi
+fi
 
 # Parse args
 BUILD=false
