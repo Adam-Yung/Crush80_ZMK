@@ -377,7 +377,8 @@
 	/* pad-mul-sel = 1: required for B91 GPIO pin routing. Same as Rainy 75. */
 	pad-mul-sel = <1>;
 
-	/* HSPI pinctrl kept for reference but HSPI node is disabled */
+	/* HSPI: CLK(PE1), MOSI(PE2) — FUNC_C alternate function.
+	 * PE0 is manual GPIO CS. Pin sharing with kscan handled by crush80_led_sync.c */
 	hspi_clk_pe1_default: hspi_clk_pe1_default {
 		pinmux = <B91_PINMUX_SET(B91_PORT_E, B91_PIN_1, B91_FUNC_C)>;
 	};
@@ -387,13 +388,40 @@
 };
 
 /*
- * HSPI disabled: PE0 is needed for kscan row 0 (F-row).
- * The AW20216S LED driver doesn't have a working ZMK driver yet anyway.
- * Re-enable once an AW20216S driver is implemented AND row 0 is moved
- * to a different GPIO (or CS is moved to a non-row pin).
+ * HSPI enabled for AW20216S LED control.
+ * PE0/PE1/PE2 are shared with matrix columns — the crush80_led_sync.c
+ * coordinator handles switching pins between GPIO (matrix) and HSPI (LEDs).
+ * The RGB thread acquires/releases pins around each SPI frame.
  */
 &hspi {
-	status = "disabled";
+	status = "okay";
+	peripheral-id = "HSPI_MODULE";
+	cs0-pin = "0";
+	cs1-pin = "0";
+	cs2-pin = "0";
+	pinctrl-0 = <&hspi_clk_pe1_default &hspi_mosi_pe2_default>;
+	pinctrl-names = "default";
+	cs-gpios = <&gpioe 0 GPIO_ACTIVE_LOW>,   /* PE0 = CS chip 0 */
+	           <&gpioc 0 GPIO_ACTIVE_LOW>;   /* PC0 = CS chip 1 */
+
+	aw20216s0: aw20216s@0 {
+		compatible = "wobkey,aw20216s";
+		reg = <0>;
+		spi-max-frequency = <1000000>;
+		num-leds = <108>;
+		global-current = <32>;
+		enable-gpios = <&gpioc 2 GPIO_ACTIVE_HIGH>;  /* PC2 = LED power */
+		status = "okay";
+	};
+
+	aw20216s1: aw20216s@1 {
+		compatible = "wobkey,aw20216s";
+		reg = <1>;
+		spi-max-frequency = <1000000>;
+		num-leds = <46>;
+		global-current = <32>;
+		status = "okay";
+	};
 };
 
 &gpioa { status = "okay"; };

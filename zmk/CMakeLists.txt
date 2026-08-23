@@ -8,6 +8,11 @@ add_subdirectory_ifdef(CONFIG_BATTERY_B91_ADC drivers/sensor)
 add_subdirectory_ifdef(CONFIG_WDT_B91 drivers/watchdog)
 add_subdirectory_ifdef(CONFIG_AW20216S drivers/led)
 
+if(CONFIG_AW20216S)
+  zephyr_library_named(crush80_led_sync)
+  zephyr_library_sources(src/crush80_led_sync.c)
+endif()
+
 if(CONFIG_BT_HCI_B91)
   zephyr_link_libraries(${CMAKE_CURRENT_SOURCE_DIR}/lib/liblt_9518_zephyr.a)
 endif()
