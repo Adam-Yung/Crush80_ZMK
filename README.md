@@ -32,6 +32,24 @@ python3 scripts/recovery_flash.py
 # Plug keyboard back in when prompted
 ```
 
+### Flash any .bin (revert to known-good firmware)
+```bash
+# Normal flash (keyboard working):
+bash scripts/flash_bin.sh dist/crush80-zmk-app.signed.bin
+
+# Recovery flash (keyboard completely dead / not on USB):
+# 1. Unplug keyboard
+# 2. Run:
+bash scripts/flash_bin.sh --recovery dist/crush80-zmk-app.signed.BACKUP.bin
+# 3. Plug keyboard in immediately when you see "Waiting for USB port..."
+```
+
+Every successful `bash build.sh` produces `dist/crush80-zmk-app.signed.bin`.
+Keep a copy of any known-good build as `.BACKUP.bin` before testing new firmware:
+```bash
+cp dist/crush80-zmk-app.signed.bin dist/crush80-zmk-app.signed.BACKUP.bin
+```
+
 ## Configuration
 
 Keymap configuration lives in `~/.config/DOTFILES/keybindings/crush80-zmk/`.
