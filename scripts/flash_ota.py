@@ -59,14 +59,68 @@ def crc16(data: bytes) -> int:
 
 def find_ota_device() -> dict | None:
     """Find the OTA HID device by VID/PID and usage page 0xFFEF.
-    Returns the hidapi device info dict or None."""
+    Returns the hidapi device info dict (with 'hidraw_path' on Linux) or None."""
+
+    # On Linux, hidapi doesn't report usage_page reliably.
+    # Find the correct hidraw device via /sys/class/hidraw.
+    if sys.platform == 'linux':
+        return _find_ota_linux()
+
     devices = hid.enumerate(VID, PID)
     for dev in devices:
         if dev.get('usage_page') == OTA_USAGE_PAGE:
             return dev
     # Fallback: some platforms don't report usage_page in enumerate.
-    # Accept first device with matching VID/PID if only one exists.
     if len(devices) == 1:
+        return devices[0]
+    return None
+
+
+def _find_ota_linux() -> dict | None:
+    """Linux-specific: find the hidraw device for the OTA interface (input2).
+
+    Searches /sys/class/hidraw/ for VID:PID match on the correct USB interface.
+    The OTA endpoint lives on USB interface 2 (HID_PHYS contains 'input2').
+    """
+    import os
+    import glob as globmod
+
+    hid_id_match = f"{VID:08X}:{PID:08X}".upper()
+    target_interface = 2
+
+    for hid_dev in sorted(globmod.glob("/sys/bus/hid/devices/*")):
+        uevent_path = os.path.join(hid_dev, "uevent")
+        if not os.path.isfile(uevent_path):
+            continue
+        with open(uevent_path) as f:
+            uevent = f.read()
+        if hid_id_match not in uevent.upper():
+            continue
+        if f"input{target_interface}" not in uevent:
+            continue
+
+        # Found the right HID device — now find its hidraw node
+        hidraw_dir = os.path.join(hid_dev, "hidraw")
+        if os.path.isdir(hidraw_dir):
+            nodes = os.listdir(hidraw_dir)
+            if nodes:
+                hidraw_path = f"/dev/{nodes[0]}"
+                return {
+                    'path': b'linux-hidraw',
+                    'vendor_id': VID,
+                    'product_id': PID,
+                    'interface_number': target_interface,
+                    'usage_page': OTA_USAGE_PAGE,
+                    'hidraw_path': hidraw_path,
+                    'product_string': 'Crush 80',
+                }
+
+    # Fallback: try hidapi enumerate and interface_number
+    devices = hid.enumerate(VID, PID)
+    for dev in devices:
+        if dev.get('interface_number') == target_interface:
+            return dev
+    if devices:
         return devices[0]
     return None
 
@@ -116,38 +170,119 @@ def load_firmware(path: str) -> tuple[bytearray, int]:
 
 
 class OTADevice:
-    """Cross-platform HID device wrapper using hidapi."""
+    """Cross-platform HID device wrapper.
+
+    On Linux: uses raw hidraw (os.open/read/write + select) because hidapi's
+    open_path often fails with the bus-path format.
+    On macOS/Windows: uses hidapi library.
+    """
 
     def __init__(self, device_info: dict):
         self.info = device_info
         self.path = device_info['path']
         self.report_size = DEFAULT_REPORT_SIZE
-        self.dev = hid.device()
+        self._use_hidraw = (sys.platform == 'linux'
+                            and 'hidraw_path' in device_info)
+        self._fd = -1
+        self._dev = None
 
     def open(self):
-        self.dev.open_path(self.path)
-        self.dev.set_nonblocking(True)
+        if self._use_hidraw:
+            import os as _os
+            hidraw = self.info['hidraw_path']
+            self._fd = _os.open(hidraw, _os.O_RDWR | _os.O_NONBLOCK)
+            # Detect actual report size from a probe write
+            self.report_size = 63  # Crush80: 1B report_id + 63B data = 64B total
+            return
+
+        self._dev = hid.device()
+        try:
+            self._dev.open_path(self.path)
+        except Exception:
+            self._dev = hid.device()
+            devices = hid.enumerate(self.info['vendor_id'], self.info['product_id'])
+            opened = False
+            for d in devices:
+                try:
+                    self._dev.open_path(d['path'])
+                    opened = True
+                    break
+                except Exception:
+                    self._dev = hid.device()
+                    continue
+            if not opened:
+                raise OSError("Cannot open any HID interface on this device")
+        self._dev.set_nonblocking(True)
 
     def close(self):
-        self.dev.close()
+        if self._use_hidraw and self._fd >= 0:
+            import os as _os
+            _os.close(self._fd)
+            self._fd = -1
+        elif self._dev:
+            self._dev.close()
+            self._dev = None
 
     def write(self, data: bytes) -> int:
         """Write data to device. First byte must be the report ID."""
-        return self.dev.write(data)
+        if self._use_hidraw:
+            import os as _os
+            return _os.write(self._fd, data)
+        return self._dev.write(data)
 
     def read(self, timeout_ms: int = 5000) -> bytes | None:
         """Read from device with timeout. Returns None on timeout."""
-        result = self.dev.read(512, timeout_ms)
+        if self._use_hidraw:
+            import select
+            ready, _, _ = select.select([self._fd], [], [],
+                                        timeout_ms / 1000.0)
+            if ready:
+                import os as _os
+                return _os.read(self._fd, 256)
+            return None
+        result = self._dev.read(512, timeout_ms)
         if result:
             return bytes(result)
         return None
 
+    def read_ota(self, timeout_ms: int = 5000) -> bytes | None:
+        """Read OTA response (report ID 5), filtering out keyboard reports."""
+        deadline = time.monotonic() + timeout_ms / 1000.0
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            if self._use_hidraw:
+                import select
+                ready, _, _ = select.select([self._fd], [], [],
+                                            min(remaining, 0.1))
+                if not ready:
+                    continue
+                import os as _os
+                data = _os.read(self._fd, 256)
+            else:
+                ms = int(min(remaining, 0.1) * 1000)
+                result = self._dev.read(512, max(ms, 1))
+                if not result:
+                    continue
+                data = bytes(result)
+            if len(data) > 0 and data[0] == REPORT_ID_OTA:
+                return data
+
     def drain(self):
         """Discard any pending data."""
-        while True:
-            data = self.dev.read(512, 50)
-            if not data:
-                break
+        if self._use_hidraw:
+            import select, os as _os
+            while True:
+                ready, _, _ = select.select([self._fd], [], [], 0.05)
+                if not ready:
+                    break
+                _os.read(self._fd, 256)
+        else:
+            while True:
+                data = self._dev.read(512, 50)
+                if not data:
+                    break
 
     @property
     def packet_size(self) -> int:
@@ -155,6 +290,8 @@ class OTADevice:
 
     @property
     def display_name(self) -> str:
+        if self._use_hidraw:
+            return f"hidraw [{self.info['hidraw_path']}]"
         mfr = self.info.get('manufacturer_string', '') or ''
         prod = self.info.get('product_string', '') or ''
         path = self.path.decode() if isinstance(self.path, bytes) else self.path
@@ -165,7 +302,6 @@ class OTADevice:
 
 def probe_device(ota_dev: OTADevice):
     """Probe the OTA device: try reading and sending a start command."""
-    packet_size = ota_dev.packet_size
     print(f"\nProbing {ota_dev.display_name} (report size {ota_dev.report_size})...")
 
     try:
@@ -173,6 +309,8 @@ def probe_device(ota_dev: OTADevice):
     except Exception as e:
         print(f"  Cannot open: {e}")
         return
+
+    packet_size = ota_dev.packet_size
 
     try:
         print("  Checking for pending data...")
@@ -214,16 +352,26 @@ def probe_device(ota_dev: OTADevice):
 
 
 def flash(ota_dev: OTADevice, fw_buf: bytearray, fw_size: int,
-          dry_run: bool = False) -> bool:
-    """Flash firmware via Telink OTA protocol."""
-    num_chunks = len(fw_buf) // CHUNK_DATA_SIZE
-    total_packets = (num_chunks + CHUNKS_PER_PACKET - 1) // CHUNKS_PER_PACKET
+          dry_run: bool = False, delay_ms: float = 0,
+          verbose: bool = False) -> bool:
+    """Flash firmware via Telink OTA protocol.
+
+    Args:
+        delay_ms: Inter-packet delay in milliseconds (0 = no delay).
+                  Use 1-5ms if the device reports fewer segments than sent.
+        verbose: Log first N ACK payloads for debugging.
+    """
+    last_seg_idx = (fw_size - 1) // CHUNK_DATA_SIZE
+    total_segments = last_seg_idx + 1
+    total_packets = (total_segments + CHUNKS_PER_PACKET - 1) // CHUNKS_PER_PACKET
     packet_size = ota_dev.packet_size
 
     print(f"\n  Device:       {ota_dev.display_name}")
-    print(f"  Chunks:       {num_chunks} ({CHUNK_DATA_SIZE} bytes each)")
+    print(f"  Segments:     {total_segments} ({CHUNK_DATA_SIZE} bytes each)")
     print(f"  Packets:      ~{total_packets}")
     print(f"  Report size:  {ota_dev.report_size} + 1 (report ID) = {packet_size} bytes")
+    if delay_ms > 0:
+        print(f"  Inter-packet delay: {delay_ms:.1f}ms")
 
     if dry_run:
         print("\n[DRY RUN] Packet examples:")
@@ -240,7 +388,7 @@ def flash(ota_dev: OTADevice, fw_buf: bytearray, fw_size: int,
             pkt2[i] = 0xFF
         pkt2[1] = 0x02; pkt2[2] = 0x00; pkt2[3] = 0x00
         idx = 0
-        for j in range(min(3, num_chunks)):
+        for j in range(min(3, total_segments)):
             chunk = bytearray(18)
             chunk[0:2] = struct.pack('<H', idx)
             chunk[2:18] = fw_buf[idx * 16:idx * 16 + 16]
@@ -251,6 +399,11 @@ def flash(ota_dev: OTADevice, fw_buf: bytearray, fw_size: int,
             idx += 1
             pkt2[2] = 20 * (j + 1)
         print(f"  Data:  {bytes(pkt2[:32]).hex(' ')} ...")
+
+        last_idx = last_seg_idx
+        complement = (0xFFFF - last_idx + 1) & 0xFFFF
+        print(f"  End:   last_idx={last_idx} (0x{last_idx:04X}), "
+              f"complement=0x{complement:04X}")
         return True
 
     try:
@@ -260,6 +413,10 @@ def flash(ota_dev: OTADevice, fw_buf: bytearray, fw_size: int,
         if sys.platform == 'linux':
             print("  Check udev rules or run with sudo")
         return False
+
+    # Re-read packet_size after open() which may adjust report_size
+    packet_size = ota_dev.packet_size
+    print(f"  Actual packet size: {packet_size} bytes")
 
     try:
         # --- START ---
@@ -273,84 +430,97 @@ def flash(ota_dev: OTADevice, fw_buf: bytearray, fw_size: int,
         start[3] = 0x00
         start[4] = 0x01
         start[5] = 0xFF
+        ota_dev.drain()
         ota_dev.write(bytes(start))
 
-        resp = ota_dev.read(timeout_ms=5000)
+        resp = ota_dev.read_ota(timeout_ms=5000)
         if resp is None:
-            print("ERROR: No response to start command (is keyboard in OTA mode?)")
+            print("ERROR: No OTA response to start command (is keyboard in OTA mode?)")
             return False
-        print(f"  ACK received ({len(resp)} bytes)")
+        print(f"  ACK: {resp[:12].hex(' ')}")
 
         # --- DATA ---
         ota_index = 0
         pkt_count = 0
+        error_count = 0
         start_time = time.monotonic()
 
-        while True:
+        while ota_index <= last_seg_idx:
             pkt = bytearray(packet_size)
             pkt[0] = REPORT_ID_OTA
             for i in range(1, packet_size):
                 pkt[i] = 0xFF
             pkt[1] = 0x02
-            pkt[2] = 0x00
             pkt[3] = 0x00
 
-            chunks_in_pkt = 0
-            saved_index = ota_index
-
+            seg_count = 0
             for j in range(CHUNKS_PER_PACKET):
-                chunk = bytearray(18)
-                chunk[0] = ota_index & 0xFF
-                chunk[1] = (ota_index >> 8) & 0xFF
+                if ota_index > last_seg_idx:
+                    break
+
+                seg = bytearray(18)
+                seg[0] = ota_index & 0xFF
+                seg[1] = (ota_index >> 8) & 0xFF
                 offset = ota_index * CHUNK_DATA_SIZE
                 for k in range(CHUNK_DATA_SIZE):
-                    if offset + k < len(fw_buf):
-                        chunk[2 + k] = fw_buf[offset + k]
+                    if offset + k < fw_size:
+                        seg[2 + k] = fw_buf[offset + k]
                     else:
-                        chunk[2 + k] = 0xFF
+                        seg[2 + k] = 0xFF
 
-                c = crc16(bytes(chunk))
-
+                c = crc16(bytes(seg))
                 base = 4 + 20 * j
-                pkt[base:base + 18] = chunk
+                pkt[base:base + 18] = seg
                 pkt[base + 18] = c & 0xFF
                 pkt[base + 19] = (c >> 8) & 0xFF
 
+                seg_count += 1
                 ota_index += 1
 
-                if ota_index * CHUNK_DATA_SIZE >= fw_size + CHUNK_DATA_SIZE:
-                    ota_index -= 1
-                    break
+            pkt[2] = seg_count * 20
 
-                chunks_in_pkt = j + 1
-                pkt[2] = 20 * (j + 1)
-
-            if chunks_in_pkt == 0:
-                ota_index = saved_index
-                break
+            if delay_ms > 0:
+                time.sleep(delay_ms / 1000.0)
 
             ota_dev.write(bytes(pkt))
             pkt_count += 1
 
-            resp = ota_dev.read(timeout_ms=10000)
+            resp = ota_dev.read_ota(timeout_ms=10000)
             if resp is None:
-                print(f"\nERROR: No ACK for packet {pkt_count} "
-                      f"(chunks {saved_index}-{ota_index - 1})")
+                print(f"\nERROR: No OTA ACK for packet {pkt_count} "
+                      f"(segments {ota_index - seg_count}-{ota_index - 1})")
                 return False
+
+            # Validate ACK content (Rainy75 protocol: error in resp[6] when
+            # resp[2]==0x03 and resp[5]==0xFF)
+            if len(resp) > 6 and resp[1] == 0x02:
+                if resp[2] == 0x03 and resp[5] == 0xFF and resp[6] != 0:
+                    print(f"\nERROR: Device reported OTA error code {resp[6]} "
+                          f"at packet {pkt_count} (segment ~{ota_index})")
+                    return False
+
+            if verbose and pkt_count <= 5:
+                print(f"\n  ACK[{pkt_count}]: {resp[:12].hex(' ')}")
 
             progress = min(100, ota_index * CHUNK_DATA_SIZE * 100 // fw_size)
             elapsed = time.monotonic() - start_time
             rate = (ota_index * CHUNK_DATA_SIZE / 1024) / elapsed if elapsed > 0 else 0
             sys.stdout.write(
                 f"\r  [{progress:3d}%] {pkt_count}/{total_packets} packets | "
+                f"seg {ota_index}/{total_segments} | "
                 f"{elapsed:.1f}s | {rate:.1f} KB/s")
             sys.stdout.flush()
 
         elapsed = time.monotonic() - start_time
-        print(f"\n  Data transfer complete: {pkt_count} packets in {elapsed:.1f}s")
+        print(f"\n  Data transfer complete: {pkt_count} packets, "
+              f"{ota_index} segments in {elapsed:.1f}s")
 
         # --- END ---
-        print("Sending OTA end...")
+        # last_idx is the 0-based index of the last segment sent (same as Rainy75)
+        last_idx = ota_index - 1
+        complement = (0xFFFF - last_idx + 1) & 0xFFFF
+
+        print(f"Sending OTA end (last_idx={last_idx}, complement=0x{complement:04X})...")
         end = bytearray(packet_size)
         end[0] = REPORT_ID_OTA
         for i in range(1, packet_size):
@@ -360,31 +530,43 @@ def flash(ota_dev: OTADevice, fw_buf: bytearray, fw_size: int,
         end[3] = 0x00
         end[4] = 0x02
         end[5] = 0xFF
-        count = (ota_index - 1) & 0xFFFF
-        neg_count = (0x10000 - count) & 0xFFFF
-        end[6] = count & 0xFF
-        end[7] = (count >> 8) & 0xFF
-        end[8] = neg_count & 0xFF
-        end[9] = (neg_count >> 8) & 0xFF
+        end[6] = last_idx & 0xFF
+        end[7] = (last_idx >> 8) & 0xFF
+        end[8] = complement & 0xFF
+        end[9] = (complement >> 8) & 0xFF
         ota_dev.write(bytes(end))
 
-        resp = ota_dev.read(timeout_ms=10000)
+        resp = ota_dev.read_ota(timeout_ms=10000)
         if resp is None:
-            print("  No final response (device likely rebooted with new firmware)")
+            print("  No response (device may have rebooted with new firmware)")
             return True
 
-        if (len(resp) >= 7 and resp[0] == REPORT_ID_OTA
-                and resp[1] == 0x02 and resp[4] == 0x06):
+        print(f"  END response: {resp[:12].hex(' ')}")
+
+        # Success format from Rainy75: resp[2]==0x03, resp[5]==0xFF, resp[6]==0x00
+        if (len(resp) >= 7 and resp[1] == 0x02
+                and resp[2] == 0x03 and resp[5] == 0xFF):
             if resp[6] == 0x00:
                 print("  OTA SUCCESS!")
                 return True
             else:
                 print(f"  OTA FAILED (error code: {resp[6]})")
                 return False
-        else:
-            print(f"  Response: {resp[:12].hex(' ')}")
-            print("  (unrecognized format, device may have rebooted successfully)")
-            return True
+
+        # Alternative: device echoes segment count in response
+        if len(resp) >= 6 and resp[1] == 0x02:
+            resp_count = resp[4] | (resp[5] << 8) if len(resp) >= 6 else 0
+            if resp_count > 0 and resp_count != last_idx + 1:
+                print(f"  WARNING: Device reports {resp_count} segments written, "
+                      f"we sent {last_idx + 1}")
+                print("  Possible data loss — try with --delay 3")
+                return False
+            elif resp_count == last_idx + 1:
+                print(f"  Device confirmed {resp_count} segments. SUCCESS!")
+                return True
+
+        print("  (unrecognized response format — device may have accepted the image)")
+        return True
 
     finally:
         ota_dev.close()
@@ -396,7 +578,8 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='Examples:\n'
                '  %(prog)s firmware_patched.bin\n'
-               '  %(prog)s code_2M_patched.bin\n'
+               '  %(prog)s --delay 5 firmware_patched.bin   (slower, more reliable)\n'
+               '  %(prog)s --verbose firmware_patched.bin   (log ACK payloads)\n'
                '  %(prog)s --dry-run firmware_patched.bin\n'
                '  %(prog)s --force --yes firmware_patched.bin\n'
                '\n'
@@ -413,6 +596,10 @@ def main():
                         help='Probe the OTA device without flashing')
     parser.add_argument('--list', action='store_true',
                         help='List all HID devices matching VID/PID')
+    parser.add_argument('--delay', type=float, default=2.0,
+                        help='Inter-packet delay in ms (default: 2.0, 0=none)')
+    parser.add_argument('--verbose', '-v', action='store_true',
+                        help='Log first few ACK payloads for debugging')
     args = parser.parse_args()
 
     # List mode
@@ -496,7 +683,8 @@ def main():
             print("Aborted.")
             sys.exit(0)
 
-    success = flash(ota_dev, fw_buf, fw_size, args.dry_run)
+    success = flash(ota_dev, fw_buf, fw_size, args.dry_run,
+                    delay_ms=args.delay, verbose=args.verbose)
 
     if success and not args.dry_run:
         print("\nFlash complete. The keyboard should reboot automatically.")
