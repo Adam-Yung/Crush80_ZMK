@@ -8,13 +8,14 @@ Crush80 ZMK firmware keymap — Home Row Mods with layers.
 
 | Key | Action |
 |-----|--------|
-| W (hold) | Nav layer |
+| W (hold) | Nav layer (or MacNav in Mac mode) |
 | CapsLock (tap) | Escape |
 | CapsLock (hold) | Sym layer |
 | Apostrophe (hold) | Sym layer |
 | Left of spacebar | Shift |
 | Right of spacebar | Tab |
 | Fn (right bottom) | Fn layer (hold) |
+| Fn + M | Toggle Mac mode |
 | ScrLk position | Toggle Native layer |
 | Shift keys | Normal shift (unchanged) |
 
@@ -197,12 +198,63 @@ F-row becomes actual F1-F12. Additional controls:
 | Enter | RGB effect cycle |
 | Up arrow | RGB brightness up |
 | Down arrow | RGB brightness down |
+| M | Toggle Mac mode (Fn+M) |
 
 ---
 
 ## Native Layer (toggle ScrLk)
 
 Full passthrough with no remapping. All keys send their standard keycodes. Press ScrLk position again to return to Base layer.
+
+---
+
+## Mac Mode (toggle Fn+M)
+
+Pressing Fn+M toggles between Base (layer 0) and Mac (layer 6). When in Mac mode, the keyboard uses macOS-appropriate shortcuts in the navigation layers.
+
+### Mac Base Layer (layer 6)
+
+Identical to the Base layer except:
+- W (hold) activates **MacNav** (layer 7) instead of Nav (layer 2)
+
+All other keys (HRM, Sym, media, etc.) remain the same.
+
+### MacNav Layer (hold W in Mac mode)
+
+Same layout as Nav but with macOS shortcuts:
+
+| Key | Nav (Linux/Win) | MacNav (macOS) |
+|-----|-----------------|----------------|
+| e | Home | Cmd+Left (line start) |
+| r | End | Cmd+Right (line end) |
+| z | Ctrl+Z (Undo) | Cmd+Z (Undo) |
+| x | Ctrl+X (Cut) | Cmd+X (Cut) |
+| c | Ctrl+C (Copy) | Cmd+C (Copy) |
+| v | Ctrl+V (Paste) | Cmd+V (Paste) |
+| , | Select Line (Home, Shift+End) | Select Line (Cmd+Left, Shift+Cmd+Right) |
+| . | Select Word (Ctrl+Left, Shift+Ctrl+Right) | Select Word (Opt+Left, Shift+Opt+Right) |
+| Space | ExtNav | MacExtNav |
+
+All other keys (arrows, Bspc, Del, Shift, CapsWord) are unchanged.
+
+### MacExtNav Layer (hold Space in MacNav)
+
+Same layout as ExtNav but with macOS shortcuts:
+
+| Key | ExtNav (Linux/Win) | MacExtNav (macOS) |
+|-----|---------------------|-------------------|
+| j | Ctrl+Left (word left) | Opt+Left (word left) |
+| l | Ctrl+Right (word right) | Opt+Right (word right) |
+| u | Ctrl+Bspc (word backspace) | Opt+Bspc (word backspace) |
+| o | Ctrl+Del (word delete) | Opt+Del (word delete) |
+| e | Home | Cmd+Left (line start) |
+| r | End | Cmd+Right (line end) |
+| z | Ctrl+Shift+Z (Redo) | Cmd+Shift+Z (Redo) |
+| x | Ctrl+X (Cut) | Cmd+X (Cut) |
+| c | Ctrl+C (Copy) | Cmd+C (Copy) |
+| v | Ctrl+V (Paste) | Cmd+V (Paste) |
+| , | Select Line | Select Line (Cmd+Left, Shift+Cmd+Right) |
+| . | Select Word | Select Word (Opt+Left, Shift+Opt+Right) |
 
 ---
 
@@ -229,3 +281,19 @@ Full passthrough with no remapping. All keys send their standard keycodes. Press
 | Quick-tap | 175ms |
 | Require prior idle | 150ms |
 | Bilateral filtering | Yes (hold-trigger-key-positions) |
+
+---
+
+## Layer Index Summary
+
+| Index | Name | Activation |
+|-------|------|------------|
+| 0 | Base | Default |
+| 1 | Fn | Hold Fn key |
+| 2 | Nav | Hold W (in Base) |
+| 3 | ExtNav | Hold Space (in Nav) |
+| 4 | Sym | Hold CapsLock or Apostrophe |
+| 5 | Native | Toggle ScrLk |
+| 6 | Mac | Toggle Fn+M |
+| 7 | MacNav | Hold W (in Mac) |
+| 8 | MacExtNav | Hold Space (in MacNav) |
