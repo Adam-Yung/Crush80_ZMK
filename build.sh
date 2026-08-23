@@ -27,6 +27,14 @@ for arg in "$@"; do
     esac
 done
 
+# ── Sync keymap config from dotfiles ────────────────────────────────────────
+DOTFILES_ZMK="$HOME/.config/DOTFILES/keybindings/crush80-zmk"
+if [ -d "$DOTFILES_ZMK" ]; then
+    echo "Syncing config from $DOTFILES_ZMK..."
+    [ -f "$DOTFILES_ZMK/crush80.keymap" ] && cp "$DOTFILES_ZMK/crush80.keymap" "$REPO_DIR/zmk/boards/crush80/crush80.keymap"
+    [ -f "$DOTFILES_ZMK/app.conf" ] && cp "$DOTFILES_ZMK/app.conf" "$REPO_DIR/conf/app.conf"
+fi
+
 # ── Locate west workspace ────────────────────────────────────────────────────
 if [ -f "$REPO_DIR/.workspace_path" ]; then
     # shellcheck source=/dev/null
