@@ -1,130 +1,60 @@
 #!/bin/bash
-# Flash Wobkey Crush 80 ZMK firmware.
-# Run from repo root: bash flash.sh
-#
-# Supported platforms: Linux, macOS, Windows (WSL)
-#
-# Prerequisites:
-#   - Keyboard plugged in via USB-C, in USB mode (not BT/2.4G)
-#   - Build artifacts in dist/  (run bash build.sh first)
-#   - Linux: udev rules installed:
-#       sudo cp docs/99-wobkey-crush80.rules /etc/udev/rules.d/
-#       sudo udevadm control --reload
-#
-# Usage:
-#   bash flash.sh          — full flash (Stage 1 + Stage 2)
-#   bash flash.sh stage1   — OTA bridge only (needed for first-time flash)
-#   bash flash.sh stage2   — ZMK app only (requires Stage 1 already done)
-#   bash flash.sh restore  — revert to stock firmware
-
+# Flash Crush 80 ZMK firmware via mcumgr
+# Usage: bash flash.sh [--build] [--skip-confirm]
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
-STAGE="${1:-all}"
-
-export PATH="/usr/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
-
-# ── Locate dist/ artifacts ───────────────────────────────────────────────────
 DIST="$REPO_DIR/dist"
-if [ ! -f "$DIST/crush80-zmk-app.signed.bin" ]; then
-    echo "ERROR: dist/ not found or incomplete. Run: bash build.sh"
+PORT="/dev/cu.usbmodem1101"
+MCUMGR="$HOME/go/bin/mcumgr"
+CONN="dev=$PORT,baud=115200"
+
+# Parse args
+BUILD=false
+SKIP_CONFIRM=false
+for arg in "$@"; do
+    case $arg in
+        --build) BUILD=true ;;
+        --skip-confirm) SKIP_CONFIRM=true ;;
+    esac
+done
+
+if [ "$BUILD" = true ]; then
+    echo "Building..."
+    bash "$REPO_DIR/build.sh" --skip-bridge --skip-mcuboot
+fi
+
+IMAGE="$DIST/crush80-zmk-app.signed.bin"
+if [ ! -f "$IMAGE" ]; then
+    echo "ERROR: $IMAGE not found. Run: bash build.sh --skip-bridge --skip-mcuboot"
     exit 1
 fi
 
-# ── Locate mcumgr ────────────────────────────────────────────────────────────
-MCUMGR="$HOME/go/bin/mcumgr"
-if [ ! -x "$MCUMGR" ]; then
-    echo "mcumgr not found. Installing..."
-    go install github.com/apache/mynewt-mcumgr-cli/mcumgr@latest
+echo "Uploading $(basename "$IMAGE")..."
+$MCUMGR --conntype serial --connstring "$CONN" image upload "$IMAGE"
+
+echo ""
+echo "Getting slot 1 hash..."
+HASH=$($MCUMGR --conntype serial --connstring "$CONN" image list | grep -A2 "slot=1" | grep hash | awk '{print $2}')
+if [ -z "$HASH" ]; then
+    echo "ERROR: Could not find slot 1 hash"
+    exit 1
 fi
+echo "  Hash: $HASH"
 
-# ── Helper: find the keyboard serial port ────────────────────────────────────
-find_serial_port() {
-    # Linux: /dev/ttyACM*
-    for dev in /dev/ttyACM0 /dev/ttyACM1 /dev/ttyUSB0; do
-        if [ -e "$dev" ]; then
-            echo "$dev"
-            return 0
-        fi
-    done
-    # macOS: /dev/cu.usbmodem*
-    for dev in /dev/cu.usbmodem*; do
-        if [ -e "$dev" ]; then
-            echo "$dev"
-            return 0
-        fi
-    done
-    echo ""
-}
+echo "Marking image for test boot..."
+$MCUMGR --conntype serial --connstring "$CONN" image test "$HASH"
 
-mcumgr_upload() {
-    local port="$1"
-    local image="$2"
-    echo "  Uploading $image..."
-    "$MCUMGR" --conntype serial --connstring "dev=$port,baud=115200" \
-        image upload "$image"
-    echo "  Confirming..."
-    "$MCUMGR" --conntype serial --connstring "dev=$port,baud=115200" \
-        image confirm
-    echo "  Resetting..."
-    "$MCUMGR" --conntype serial --connstring "dev=$port,baud=115200" \
-        reset
-}
+echo "Resetting keyboard..."
+$MCUMGR --conntype serial --connstring "$CONN" reset || true
 
-# ── Stage 1: OTA bridge ──────────────────────────────────────────────────────
-if [ "$STAGE" = "all" ] || [ "$STAGE" = "stage1" ]; then
-    echo ""
-    echo "========================================"
-    echo "  Stage 1: Flashing OTA bridge"
-    echo "  (keyboard must be in USB mode)"
-    echo "========================================"
-    echo ""
-    python3 "$REPO_DIR/scripts/flash_ota.py" "$DIST/crush80-ota-bridge.bin"
-    echo ""
-    echo "  OTA bridge flashed. Waiting 5s for USB re-enumeration..."
-    sleep 5
-fi
-
-# ── Stage 2: ZMK application ─────────────────────────────────────────────────
-if [ "$STAGE" = "all" ] || [ "$STAGE" = "stage2" ]; then
-    echo ""
-    echo "========================================"
-    echo "  Stage 2: Flashing ZMK application"
-    echo "========================================"
-    echo ""
-    PORT="$(find_serial_port)"
-    if [ -z "$PORT" ]; then
-        echo "ERROR: No serial device found."
-        if [ "$(uname)" = "Darwin" ]; then
-            echo "  The keyboard should appear as /dev/cu.usbmodem* after Stage 1."
-            echo "  Check: ls /dev/cu.usbmodem*"
-        else
-            echo "  The keyboard should appear as /dev/ttyACM0 after Stage 1."
-            echo "  Check: ls /dev/ttyACM*"
-        fi
-        exit 1
-    fi
-    echo "  Found keyboard at $PORT"
-    mcumgr_upload "$PORT" "$DIST/crush80-zmk-app.signed.bin"
-    echo ""
-    echo "  ZMK application flashed."
-    echo "  The keyboard will reboot and appear as 'Crush 80' over USB and Bluetooth."
-fi
-
-# ── Restore to stock firmware ─────────────────────────────────────────────────
-if [ "$STAGE" = "restore" ]; then
-    echo ""
-    echo "========================================"
-    echo "  Restoring stock Evision firmware"
-    echo "========================================"
-    echo ""
-    # Delegate to restore_stock.sh which handles firmware path prompting
-    RESTORE_ARGS=""
-    if [ -n "${2:-}" ] && [ -f "${2:-}" ]; then
-        RESTORE_ARGS="$2"
-    fi
-    bash "$REPO_DIR/restore_stock.sh" $RESTORE_ARGS
+if [ "$SKIP_CONFIRM" = false ]; then
+    echo "Waiting 12s for MCUboot swap..."
+    sleep 12
+    echo "Confirming image..."
+    $MCUMGR --conntype serial --connstring "$CONN" image confirm ""
 fi
 
 echo ""
-echo "Done."
+echo "Done! Firmware updated successfully."
+$MCUMGR --conntype serial --connstring "$CONN" echo "hello"
