@@ -28,22 +28,26 @@ for arg in "$@"; do
 done
 
 # ── Sync keymap config from dotfiles ────────────────────────────────────────
+# Priority:
+#   1. CRUSH80_KEYMAP env var (explicit path to a .keymap file)
+#   2. Dotfiles directory (~/.config/DOTFILES/keybindings/crush80-zmk/)
+#   3. Repo default (keymaps/stock.keymap)
 DOTFILES_ZMK="${CRUSH80_ZMK_CONFIG:-$HOME/.config/DOTFILES/keybindings/crush80-zmk}"
-if [ ! -d "$DOTFILES_ZMK" ]; then
-    echo "ZMK config directory not found: $DOTFILES_ZMK"
-    echo "Set CRUSH80_ZMK_CONFIG to your config directory, or press Enter to skip."
-    read -rp "Config path (blank to skip): " user_path
-    if [ -n "$user_path" ] && [ -d "$user_path" ]; then
-        DOTFILES_ZMK="$user_path"
-    else
-        echo "  Skipping config sync (using repo defaults)."
-        DOTFILES_ZMK=""
+
+if [ -n "${CRUSH80_KEYMAP:-}" ] && [ -f "$CRUSH80_KEYMAP" ]; then
+    echo "Using keymap from CRUSH80_KEYMAP: $CRUSH80_KEYMAP"
+    cp "$CRUSH80_KEYMAP" "$REPO_DIR/zmk/boards/crush80/crush80.keymap"
+    # If CRUSH80_APP_CONF is also set, use that
+    if [ -n "${CRUSH80_APP_CONF:-}" ] && [ -f "$CRUSH80_APP_CONF" ]; then
+        cp "$CRUSH80_APP_CONF" "$REPO_DIR/conf/app.conf"
     fi
-fi
-if [ -n "$DOTFILES_ZMK" ] && [ -d "$DOTFILES_ZMK" ]; then
+elif [ -d "$DOTFILES_ZMK" ]; then
     echo "Syncing config from $DOTFILES_ZMK..."
     [ -f "$DOTFILES_ZMK/crush80.keymap" ] && cp "$DOTFILES_ZMK/crush80.keymap" "$REPO_DIR/zmk/boards/crush80/crush80.keymap"
     [ -f "$DOTFILES_ZMK/app.conf" ] && cp "$DOTFILES_ZMK/app.conf" "$REPO_DIR/conf/app.conf"
+elif [ -f "$REPO_DIR/keymaps/stock.keymap" ]; then
+    echo "No custom keymap configured — using keymaps/stock.keymap"
+    cp "$REPO_DIR/keymaps/stock.keymap" "$REPO_DIR/zmk/boards/crush80/crush80.keymap"
 fi
 
 # ── Locate west workspace ────────────────────────────────────────────────────

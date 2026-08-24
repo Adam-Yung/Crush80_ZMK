@@ -1,36 +1,49 @@
 #!/bin/bash
 # Crush80 ZMK Firmware Update Script
-# Usage: bash update.sh [--build]
+# Usage: bash update.sh [--build] [--firmware PATH]
 #
-# Prerequisites:
-#   - Keyboard is in bootloader mode (press Fn+Esc)
-#   - mcumgr is installed (go install github.com/apache/mynewt-mcumgr-cli/mcumgr@latest)
-#   - Firmware has been built (bash build.sh)
+# Flashes ZMK firmware onto a running Crush80 keyboard via mcumgr DFU.
+# The keyboard must already be running ZMK (with MCUmgr support).
+#
+# Firmware location (checked in order):
+#   1. --firmware PATH argument
+#   2. CRUSH80_FIRMWARE environment variable
+#   3. dist/crush80-zmk-app.signed.bin (default)
 #
 # What this does:
 #   1. (optional) Rebuilds firmware if --build is passed
-#   2. Waits for MCUboot serial device to appear
-#   3. Flashes dist/crush80-zmk-app.signed.bin via mcumgr
-#   4. Resets the keyboard
+#   2. Detects the keyboard serial port
+#   3. Uploads firmware via mcumgr
+#   4. Marks for test boot, prompts user to unplug/replug
+#   5. Auto-confirm happens on next boot (mcuboot_confirm.c)
 
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
-FIRMWARE="$REPO_DIR/dist/crush80-zmk-app.signed.bin"
+FIRMWARE="${CRUSH80_FIRMWARE:-$REPO_DIR/dist/crush80-zmk-app.signed.bin}"
 DO_BUILD=false
 
 for arg in "$@"; do
     case $arg in
         --build) DO_BUILD=true ;;
+        --firmware)
+            shift
+            FIRMWARE="$1"
+            ;;
+        --firmware=*)
+            FIRMWARE="${arg#--firmware=}"
+            ;;
         --help|-h)
-            echo "Usage: bash update.sh [--build]"
+            echo "Usage: bash update.sh [--build] [--firmware PATH]"
             echo ""
-            echo "  --build    Rebuild firmware before flashing"
+            echo "  --build           Rebuild firmware before flashing"
+            echo "  --firmware PATH   Path to .signed.bin file"
             echo ""
-            echo "Steps:"
-            echo "  1. Press Fn+Esc on the keyboard (enters bootloader)"
-            echo "  2. Run: bash update.sh"
-            echo "  3. Keyboard reboots with new firmware in ~5 seconds"
+            echo "Environment variables:"
+            echo "  CRUSH80_FIRMWARE  Path to firmware .signed.bin (alternative to --firmware)"
+            echo "  CRUSH80_KEYMAP    Path to .keymap file (used by --build)"
+            echo ""
+            echo "After flashing, UNPLUG and REPLUG the keyboard for MCUboot swap."
             exit 0
             ;;
     esac
@@ -68,8 +81,8 @@ echo "Firmware: $FIRMWARE ($(wc -c < "$FIRMWARE" | tr -d ' ') bytes)"
 echo ""
 
 # Detect serial port (wait up to 15 seconds)
-echo "Waiting for MCUboot serial device..."
-echo "  (Press Fn+Esc on the keyboard if you haven't already)"
+echo "Looking for keyboard serial port..."
+echo "  (Make sure the keyboard is plugged in via USB)"
 echo ""
 
 SERIAL_PORT=""
@@ -104,6 +117,13 @@ fi
 echo "  Found: $SERIAL_PORT"
 echo ""
 
+# Toggle DTR to wake mcumgr transport
+python3 -c "
+import serial, time
+s = serial.Serial('$SERIAL_PORT', 115200, timeout=1)
+s.dtr = True; time.sleep(0.5); s.close()
+" 2>/dev/null || true
+
 # Flash firmware
 CONN="dev=$SERIAL_PORT,baud=115200"
 
@@ -111,14 +131,23 @@ echo "Uploading firmware..."
 $MCUMGR --conntype serial --connstring "$CONN" image upload "$FIRMWARE"
 echo ""
 
-echo "Confirming image..."
-$MCUMGR --conntype serial --connstring "$CONN" image confirm ""
+echo "Getting slot 1 hash..."
+HASH=$($MCUMGR --conntype serial --connstring "$CONN" image list | grep -A2 "slot=1" | grep hash | awk '{print $2}')
+if [ -z "$HASH" ]; then
+    echo "ERROR: Could not find slot 1 hash. Upload may have failed."
+    exit 1
+fi
+echo "  Hash: $HASH"
+
+echo "Marking image for test boot..."
+$MCUMGR --conntype serial --connstring "$CONN" image test "$HASH"
 echo ""
 
-echo "Resetting keyboard..."
-$MCUMGR --conntype serial --connstring "$CONN" reset
+echo "=== Upload complete! ==="
 echo ""
-
-echo "=== Update complete! ==="
-echo "  Keyboard will reboot with new firmware in ~2 seconds."
-echo "  If it doesn't come back within 30s, MCUboot will auto-revert."
+echo "  IMPORTANT: Unplug the keyboard USB cable, wait 2 seconds, then plug back in."
+echo "  MCUboot will swap to the new firmware on cold boot (~12 seconds)."
+echo "  The firmware auto-confirms after successful boot."
+echo ""
+echo "  If something goes wrong, unplug/replug again — MCUboot reverts automatically"
+echo "  if the new firmware fails to confirm within 11 seconds."

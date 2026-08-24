@@ -1,79 +1,133 @@
 # Crush 80 ZMK Firmware
 
-Custom ZMK firmware for the Wobkey Crush 80 mechanical keyboard (Telink TLSR9518/B91).
+Custom ZMK firmware for the Wobkey Crush 80 mechanical keyboard (Telink TLSR9518/B91 RISC-V).
 
-## Prerequisites
+## Features
 
-- macOS (arm64)
-- West workspace at `~/Projects/crush80-workspace` (run `bash install_zmk.sh` to set up)
-- Zephyr SDK at `~/zephyr-sdk-0.17.0`
-- Go mcumgr: `~/go/bin/mcumgr`
-- Python 3 with pyserial: `pip install pyserial`
+- Full ZMK support: USB HID, Bluetooth 5.0, MCUboot DFU
+- MCUmgr firmware updates over USB serial (no special hardware needed)
+- Stock QWERTY keymap included (ready to flash out of the box)
+- Example advanced keymap with Home Row Mods, Nav/Sym layers, Mac mode
 
-## Quick Start
+## Quick Start (New User)
 
-### Build
+### 1. Set up the build environment
+
+```bash
+git clone https://github.com/Adam-Yung/Crush80_ZMK.git
+cd Crush80_ZMK
+bash setup.sh
+```
+
+This installs: Zephyr SDK, west, Python dependencies, Go mcumgr, and initializes the build workspace. Takes ~10 minutes on first run.
+
+### 2. Build firmware
+
 ```bash
 bash build.sh --skip-bridge --skip-mcuboot
 ```
 
-### Flash
+This builds the ZMK firmware using the stock keymap. Output: `dist/crush80-zmk-app.signed.bin`
+
+### 3. Install ZMK on a stock Crush 80
+
+If your keyboard is still running the manufacturer firmware:
+
 ```bash
-bash flash.sh --build   # builds then flashes
-# or just flash (if already built):
-bash flash.sh
+bash install_zmk.sh
 ```
 
-### Recovery (if keyboard SMP is unresponsive)
+This uses the OTA bridge method to replace the stock firmware with ZMK. Fully reversible with `bash restore_stock.sh`.
+
+### 4. Update firmware (keyboard already running ZMK)
+
 ```bash
-bash flash.sh --build   # build first
-# Then unplug keyboard, run:
-python3 scripts/recovery_flash.py
-# Plug keyboard back in when prompted
+bash update.sh --build
 ```
 
-### Flash any .bin (revert to known-good firmware)
-```bash
-# Normal flash (keyboard working):
-bash scripts/flash_bin.sh dist/crush80-zmk-app.signed.bin
+Or if you've already built:
 
-# Recovery flash (keyboard completely dead / not on USB):
-# 1. Unplug keyboard
-# 2. Run:
-bash scripts/flash_bin.sh --recovery dist/crush80-zmk-app.signed.BACKUP.bin
-# 3. Plug keyboard in immediately when you see "Waiting for USB port..."
+```bash
+bash update.sh
 ```
 
-Every successful `bash build.sh` produces `dist/crush80-zmk-app.signed.bin`.
-Keep a copy of any known-good build as `.BACKUP.bin` before testing new firmware:
+After upload completes, **unplug the keyboard USB cable, wait 2 seconds, plug back in**. MCUboot swaps to the new firmware on cold boot.
+
+## Keymap Configuration
+
+### Available keymaps
+
+| File | Description |
+|------|-------------|
+| `keymaps/stock.keymap` | Standard QWERTY + Fn layer (BT/USB controls). Default. |
+| `keymaps/example.keymap` | Advanced: Home Row Mods, Nav/ExtNav, Sym, Mac mode (9 layers) |
+
+### Using a custom keymap
+
+Set the `CRUSH80_KEYMAP` environment variable before building:
+
 ```bash
-cp dist/crush80-zmk-app.signed.bin dist/crush80-zmk-app.signed.BACKUP.bin
+export CRUSH80_KEYMAP=/path/to/my/crush80.keymap
+bash build.sh --skip-bridge --skip-mcuboot
+bash update.sh
 ```
 
-## Configuration
+### Keymap selection priority
 
-Keymap configuration lives in `~/.config/DOTFILES/keybindings/crush80-zmk/`.
-The build script syncs it automatically.
+1. `CRUSH80_KEYMAP` env var (explicit path to a `.keymap` file)
+2. Dotfiles directory (`~/.config/DOTFILES/keybindings/crush80-zmk/`)
+3. `keymaps/stock.keymap` (default)
 
-Key files:
-- `crush80.keymap` — Key bindings (layers, home row mods, macros)
-- `app.conf` — ZMK application config (USB, BLE, battery, etc.)
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `CRUSH80_KEYMAP` | Path to `.keymap` file to use for build |
+| `CRUSH80_APP_CONF` | Path to `app.conf` to use for build |
+| `CRUSH80_FIRMWARE` | Path to `.signed.bin` for `update.sh` (skips build) |
+| `CRUSH80_ZMK_CONFIG` | Path to config directory (contains `crush80.keymap` + `app.conf`) |
+
+## Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `setup.sh` | One-time environment setup (SDK, west, mcumgr) |
+| `build.sh` | Build ZMK firmware from source |
+| `update.sh` | Flash firmware onto a running ZMK keyboard |
+| `flash.sh` | Flash with DTR wake + test/confirm flow |
+| `install_zmk.sh` | First-time install from stock manufacturer firmware |
+| `restore_stock.sh` | Revert to original manufacturer firmware |
+| `scripts/recovery_flash.py` | Recovery flash when SMP is unresponsive |
+
+## Recovery
+
+If the keyboard stops responding after a bad flash:
+
+1. **Unplug and replug** — MCUboot auto-reverts if the new firmware doesn't confirm within 11 seconds
+2. **Recovery flash** — `python3 scripts/recovery_flash.py` (unplug, run script, replug when prompted)
+3. **Restore stock** — `bash restore_stock.sh`
 
 ## Project Structure
 
 ```
-zmk/boards/crush80/     Board definition (DTS, defconfig)
-conf/                   Build configuration
+keymaps/                Custom keymap files (stock.keymap, example.keymap)
+conf/                   Build configuration (app.conf, mcuboot.conf)
+zmk/                    ZMK module (board def, drivers, DTS, source)
+  boards/crush80/       Board definition (DTS, defconfig, matrix)
+  drivers/              Platform drivers (USB, BLE, battery, watchdog, LED)
+  src/                  Application source (boot_diag, flash_mgmt, etc.)
 scripts/                Flashing and diagnostic tools
-dist/                   Built firmware artifacts (gitignored)
+patches/                Zephyr and ZMK patches for B91 platform
 docs/                   Technical documentation
+dist/                   Built firmware artifacts (gitignored)
 ```
 
-## Key Technical Notes
+## Technical Notes
 
-- Matrix: 6 rows × 16 columns, col2row diodes
-- GPIO columns: PE0,PE1,PE2,PE4,PE5,PE6,PB0,PB1,PB2,PB3,PB4,PB5,PB6,PC0,PC1,PC4
-- GPIO rows: PD7,PD2,PD3,PD4,PD5,PD6
-- PE0/PE1/PE2 are shared between matrix scan and LED SPI — HSPI is disabled
-- Flash via MCUboot image swap: upload → test → reset → confirm
-- NEVER set CONFIG_LOG_DEFAULT_LEVEL=4 (bricks SMP serial communication)
+- MCU: Telink TLSR9518 (B91 RISC-V), 48 MHz, 128KB ILM + 128KB DLM, 1MB flash
+- Matrix: 6 rows x 16 columns, col2row diode direction, 88 keys
+- Flash layout: MCUboot (0x0-0x10000), App (0x10000-0x80000), Slot1 (0x80000-0xF0000)
+- BLE: Telink proprietary blob (`liblt_9518_zephyr.a`)
+- MCUboot swap requires **physical USB unplug/replug** (cold boot) — software reset alone does NOT trigger swap
+- NEVER set `CONFIG_LOG_DEFAULT_LEVEL=4` (floods serial, bricks SMP)
+- HSPI is disabled — PE0/PE1/PE2 are shared between matrix columns and LED SPI
