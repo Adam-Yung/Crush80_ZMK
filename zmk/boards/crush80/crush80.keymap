@@ -5,14 +5,11 @@
  * Primary target: Linux/Windows (macOS compatible via home row GUI mod)
  *
  * Layer 0: Base — HRM (CAGS), media F-row, W(hold)=Nav, Caps(hold)=Sym, '(hold)=Sym
- * Layer 1: Fn — F1-F12, BT profiles, RGB, output toggle, Fn+M=toggle Mac
+ * Layer 1: Fn — F1-F12, BT profiles, RGB, output toggle
  * Layer 2: Nav — IJKL arrows, editing (hold W)
  * Layer 3: ExtNav — Word-jump, PgUp/PgDn (hold Space while in Nav)
  * Layer 4: Sym — Numbers left, punctuation right (hold Caps or ')
  * Layer 5: Native — Full passthrough, toggled by ScrLk
- * Layer 6: Mac — Mac base layer (Fn+M toggle), W(hold)=MacNav
- * Layer 7: MacNav — Nav with macOS shortcuts (Cmd/Opt instead of Ctrl)
- * Layer 8: MacExtNav — ExtNav with macOS shortcuts
  *
  * Bottom row (base):
  *   LCtrl  LGui  [Shift]  Space  [Tab]  Fn  RCtrl  |  Left Down Right
@@ -32,15 +29,12 @@
 #include <dt-bindings/zmk/rgb.h>
 
 /* Layer indices */
-#define BASE      0
-#define FN        1
-#define NAV       2
-#define EXTNAV    3
-#define SYM       4
-#define NATIVE    5
-#define MAC       6
-#define MACNAV    7
-#define MACEXTNAV 8
+#define BASE   0
+#define FN     1
+#define NAV    2
+#define EXTNAV 3
+#define SYM    4
+#define NATIVE 5
 
 /*
  * Key position indices for hold-trigger-key-positions (bilateral HRM).
@@ -124,19 +118,6 @@
 		};
 
 		/*
-		 * Layer-tap for MacNav (hold W in MAC layer).
-		 */
-		lt_macnav: layer_tap_macnav {
-			compatible = "zmk,behavior-hold-tap";
-			#binding-cells = <2>;
-			flavor = "balanced";
-			tapping-term-ms = <280>;
-			quick-tap-ms = <175>;
-			require-prior-idle-ms = <150>;
-			bindings = <&mo>, <&kp>;
-		};
-
-		/*
 		 * Layer-tap for Sym (hold Caps or Apostrophe).
 		 * Caps: tap=ESC, hold=Sym. Apostrophe: tap=SQT, hold=Sym.
 		 */
@@ -195,24 +176,6 @@
 			compatible = "zmk,behavior-macro";
 			#binding-cells = <0>;
 			bindings = <&kp LS(N9) &kp LS(N0) &kp SPACE &kp EQUAL &kp LS(DOT)>;
-		};
-
-		/*
-		 * Mac Select Word: Option+Left then Shift+Option+Right
-		 */
-		mac_sel_w: mac_sel_w {
-			compatible = "zmk,behavior-macro";
-			#binding-cells = <0>;
-			bindings = <&kp LA(LEFT) &kp LS(LA(RIGHT))>;
-		};
-
-		/*
-		 * Mac Select Line: Cmd+Left then Shift+Cmd+Right
-		 */
-		mac_sel_l: mac_sel_l {
-			compatible = "zmk,behavior-macro";
-			#binding-cells = <0>;
-			bindings = <&kp LG(LEFT) &kp LS(LG(RIGHT))>;
 		};
 	};
 
@@ -295,9 +258,9 @@
 				&trans        &trans        &trans        &trans        &trans
 				&trans        &trans        &trans        &trans        &trans
 				&trans        &trans                      &rgb_ug RGB_EFF
-				/* Row 4: Fn+Up=RGB bright up, Fn+M=toggle Mac mode */
+				/* Row 4: Fn+Up=RGB bright up */
 				&trans                      &trans        &trans        &trans
-				&trans        &trans        &trans        &tog MAC      &trans
+				&trans        &trans        &trans        &trans        &trans
 				&trans        &trans                      &trans        &rgb_ug RGB_BRI
 				/* Row 5: Fn+Down=RGB bright down */
 				&trans        &trans        &trans                      &trans
@@ -456,120 +419,6 @@
 				&kp LCTRL     &kp LGUI      &kp LALT                    &kp SPACE
 				&kp RALT      &mo FN        &kp RCTRL
 				&kp LEFT      &kp DOWN      &kp RIGHT
-			>;
-		};
-
-		/*
-		 * Layer 6: Mac Base (toggled by Fn+M)
-		 * Identical to Base but W(hold) activates MACNAV instead of NAV.
-		 */
-		mac_layer {
-			display-name = "Mac";
-			bindings = <
-				/* Row 0: F-row (media keys, ScrLk=toggle native) */
-				&kp ESC       &kp C_BRI_DN  &kp C_BRI_UP  &kp F3        &kp F4
-				&kp F5        &kp F6        &kp C_PREV    &kp C_PP
-				&kp C_NEXT    &kp C_MUTE    &kp C_VOL_DN  &kp C_VOL_UP
-				&kp PSCRN     &tog NATIVE   &kp PAUSE_BREAK
-				/* Row 1: number row + nav cluster */
-				&kp GRAVE     &kp N1        &kp N2        &kp N3        &kp N4
-				&kp N5        &kp N6        &kp N7        &kp N8        &kp N9
-				&kp N0        &kp MINUS     &kp EQUAL     &kp BSPC
-				&kp INS       &kp HOME      &kp PG_UP
-				/* Row 2: QWERTY + nav cluster (W = tap W / hold MacNav) */
-				&kp TAB       &kp Q         &lt_macnav MACNAV W &kp E   &kp R
-				&kp T         &kp Y         &kp U         &kp I         &kp O
-				&kp P         &kp LBKT      &kp RBKT      &kp BSLH
-				&kp DEL       &kp END       &kp PG_DN
-				/* Row 3: home row (HRM: A=Ctrl, S=Alt, D=Gui, F=Shift / J=Shift, K=Gui, L=Alt, ;=Ctrl) */
-				&lt_sym SYM ESC &hml LCTRL A &hml LALT S &hml LGUI D &hml LSHFT F
-				&kp G         &kp H         &hmr RSHFT J  &hmr RGUI K   &hmr RALT L
-				&hmr RCTRL SEMI &lt_sym SYM SQT           &kp RET
-				/* Row 4: shift row */
-				&kp LSHFT                   &kp Z         &kp X         &kp C
-				&kp V         &kp B         &kp N         &kp M         &kp COMMA
-				&kp DOT       &kp FSLH                    &kp RSHFT     &kp UP
-				/* Row 5: bottom row (LAlt=Shift, RAlt=Tab) */
-				&kp LCTRL     &kp LGUI      &kp LSHFT                   &kp SPACE
-				&kp TAB       &mo FN        &kp RCTRL
-				&kp LEFT      &kp DOWN      &kp RIGHT
-			>;
-		};
-
-		/*
-		 * Layer 7: MacNav (hold W in Mac mode)
-		 * Same as Nav but with macOS shortcuts:
-		 * Cmd instead of Ctrl for undo/cut/copy/paste
-		 * Cmd+Arrow for Home/End, Option for word ops
-		 */
-		macnav_layer {
-			display-name = "MacNav";
-			bindings = <
-				/* Row 0: blocked */
-				&none         &none         &none         &none         &none
-				&none         &none         &none         &none
-				&none         &none         &none         &none
-				&none         &none         &none
-				/* Row 1: blocked */
-				&none         &none         &none         &none         &none
-				&none         &none         &none         &none         &none
-				&none         &none         &none         &none
-				&none         &none         &none
-				/* Row 2: Tab, Esc, (W held), Cmd+Left(Home), Cmd+Right(End), Shift */
-				&kp TAB       &kp ESC       &trans        &kp LG(LEFT)  &kp LG(RIGHT)
-				&kp LSHFT     &none         &kp BSPC      &kp UP        &kp DEL
-				&none         &none         &none         &none
-				&none         &none         &none
-				/* Row 3: _, Shift, Shift, _, _, CapsWord, _, Left, Down, Right, Shift+Enter */
-				&none         &kp LSHFT     &kp LSHFT     &none         &none
-				&caps_word    &none         &kp LEFT      &kp DOWN      &kp RIGHT
-				&kp LS(RET)   &none                       &kp RET
-				/* Row 4: Shift, Undo(Cmd+Z), Cut(Cmd+X), Copy(Cmd+C), Paste(Cmd+V), MacSelLine, MacSelWord */
-				&kp LSHFT                   &kp LG(Z)     &kp LG(X)     &kp LG(C)
-				&kp LG(V)     &none         &none         &none         &mac_sel_l
-				&mac_sel_w    &none                       &kp RSHFT     &trans
-				/* Row 5: pass mods through, Space=MacExtNav */
-				&kp LCTRL     &kp LGUI      &kp LALT                    &mo MACEXTNAV
-				&trans        &trans        &kp RCTRL
-				&trans        &trans        &trans
-			>;
-		};
-
-		/*
-		 * Layer 8: MacExtNav (hold Space while in MacNav)
-		 * Same as ExtNav but with macOS shortcuts:
-		 * Option for word jump/delete, Cmd+Shift+Z for redo
-		 */
-		macextnav_layer {
-			display-name = "MacExtNav";
-			bindings = <
-				/* Row 0: blocked */
-				&none         &none         &none         &none         &none
-				&none         &none         &none         &none
-				&none         &none         &none         &none
-				&none         &none         &none
-				/* Row 1: blocked */
-				&none         &none         &none         &none         &none
-				&none         &none         &none         &none         &none
-				&none         &none         &none         &none
-				&none         &none         &none
-				/* Row 2: Tab, Esc, _, Cmd+Left(Home), Cmd+Right(End), Shift, _, Opt+Bspc, PgUp, Opt+Del */
-				&kp TAB       &kp ESC       &trans        &kp LG(LEFT)  &kp LG(RIGHT)
-				&kp LSHFT     &none         &kp LA(BSPC)  &kp PG_UP     &kp LA(DEL)
-				&none         &none         &none         &none
-				&none         &none         &none
-				/* Row 3: _, Shift, Shift, _, _, _, _, Opt+Left, PgDn, Opt+Right, Enter */
-				&none         &kp LSHFT     &kp LSHFT     &none         &none
-				&none         &none         &kp LA(LEFT)  &kp PG_DN     &kp LA(RIGHT)
-				&kp RET       &none                       &kp RET
-				/* Row 4: Shift, Redo(Cmd+Shift+Z), Cut(Cmd+X), Copy(Cmd+C), Paste(Cmd+V), MacSelLine, MacSelWord */
-				&kp LSHFT                   &kp LG(LS(Z)) &kp LG(X)     &kp LG(C)
-				&kp LG(V)     &none         &none         &none         &mac_sel_l
-				&mac_sel_w    &none                       &kp RSHFT     &trans
-				/* Row 5: mods pass through, Space is held (layer active) */
-				&kp LCTRL     &kp LGUI      &kp LALT                    &none
-				&trans        &trans        &kp RCTRL
-				&trans        &trans        &trans
 			>;
 		};
 	};
