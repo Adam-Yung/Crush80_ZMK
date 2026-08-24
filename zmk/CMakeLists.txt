@@ -42,6 +42,11 @@ if(CONFIG_USB_DC_B91 AND CONFIG_ZMK_USB)
   zephyr_library_sources(src/usb_cdc_recover.c)
 endif()
 
+if(CONFIG_CRUSH80_RGB)
+  zephyr_library_named(crush80_rgb)
+  zephyr_library_sources(src/crush80_rgb.c)
+endif()
+
 if(CONFIG_ZMK_BLE)
   zephyr_library_named(crush80_ble_name)
   zephyr_library_sources(src/crush80_ble_name.c)

@@ -26,3 +26,12 @@ config FLASH_MGMT
 	  Adds a custom mcumgr group (ID 64) with raw flash erase/write/read
 	  commands. Used to restore original firmware via USB without SWS
 	  hardware.
+
+config CRUSH80_RGB
+	bool "Crush80 RGB LED driver (AW20216S via GPIO bit-bang SPI)"
+	default n
+	depends on GPIO
+	help
+	  Custom RGB LED driver for the Crush80 keyboard's two AW20216S chips.
+	  Uses GPIO bit-bang SPI on PE0/PE1/PE2 (shared with kscan columns).
+	  Temporarily pauses kscan during LED updates (~3-5ms per frame at 30Hz).
