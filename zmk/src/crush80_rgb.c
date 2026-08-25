@@ -61,6 +61,7 @@ LOG_MODULE_REGISTER(crush80_rgb, LOG_LEVEL_INF);
 #define REG_HSPI_FIFO_ST   (*(volatile uint8_t *)(HSPI_BASE + 0x0D))
 #define REG_HSPI_IRQ_ST    (*(volatile uint8_t *)(HSPI_BASE + 0x0E))
 #define REG_HSPI_STATUS    (*(volatile uint8_t *)(HSPI_BASE + 0x0F))
+#define REG_HSPI_XIP_CTRL  (*(volatile uint8_t *)(HSPI_BASE + 0x14))
 
 /* HSPI clock enable */
 #define REG_CLK_EN0        (*(volatile uint8_t *)0x801401E4)
@@ -109,19 +110,47 @@ static bool rgb_initialized;
 static K_THREAD_STACK_DEFINE(rgb_stack, RGB_STACK_SIZE);
 static struct k_thread rgb_thread_data;
 
+/* ── PE function mux register ────────────────────────────────────────── */
+
+/*
+ * reg_gpio_pe_fuc_l at 0x80140350 contains 2-bit function select per pin:
+ *   PE0=[1:0], PE1=[3:2], PE2=[5:4], PE3=[7:6]
+ * Values: 0=FUNC_A, 1=FUNC_B, 2=FUNC_C (HSPI), 3=FUNC_D
+ *
+ * Just clearing the GPIO function bit (0x80140326) enters alt-mode,
+ * but WITHOUT the correct mux value the pin routes to FUNC_A (I2C), not HSPI.
+ */
+#define REG_GPIO_PE_FUC_L  (*(volatile uint8_t *)0x80140350)
+
+#define PE1_FUNC_SHIFT  2
+#define PE2_FUNC_SHIFT  4
+#define PE1_FUNC_MASK   (0x03 << PE1_FUNC_SHIFT)  /* bits [3:2] */
+#define PE2_FUNC_MASK   (0x03 << PE2_FUNC_SHIFT)  /* bits [5:4] */
+#define FUNC_C_VAL      0x02
+
 /* ── Pin management ──────────────────────────────────────────────────── */
 
 static inline void pins_to_hspi(void) {
-    /* Switch PE1/PE2 from GPIO to HSPI alternate function (FUNC_C).
-     * SDK's hspi_set_pin_mux() does both gpio_function_dis + gpio_input_en. */
-    REG_GPIO_PE_FUNC &= ~(PE1_BIT | PE2_BIT);  /* disable GPIO function → alt mode */
-    REG_GPIO_PE_IE |= (PE1_BIT | PE2_BIT);     /* enable input (required for HSPI output driver) */
+    /* 1. Set PE1/PE2 func_mux to FUNC_C (HSPI CLK / MOSI) */
+    REG_GPIO_PE_FUC_L = (REG_GPIO_PE_FUC_L & ~(PE1_FUNC_MASK | PE2_FUNC_MASK))
+                        | (FUNC_C_VAL << PE1_FUNC_SHIFT)
+                        | (FUNC_C_VAL << PE2_FUNC_SHIFT);
+    /* 2. Disable GPIO function → enter alt mode */
+    REG_GPIO_PE_FUNC &= ~(PE1_BIT | PE2_BIT);
+    /* 3. Enable input (required for HSPI output driver per SDK convention) */
+    REG_GPIO_PE_IE |= (PE1_BIT | PE2_BIT);
+    /* 4. Clear OEN (output enable) — stock firmware does this explicitly.
+     * On B91, OEN=0 means output driver active. Even in alt-function mode,
+     * the pin won't drive unless OEN is cleared. */
+    REG_GPIO_PE_OEN &= ~(PE1_BIT | PE2_BIT);
 }
 
 static inline void pins_to_gpio(void) {
     /* Restore PE1/PE2 to GPIO mode for kscan */
-    REG_GPIO_PE_IE &= ~(PE1_BIT | PE2_BIT);   /* disable input (kscan uses output mode) */
-    REG_GPIO_PE_FUNC |= (PE1_BIT | PE2_BIT);  /* enable GPIO function */
+    REG_GPIO_PE_IE &= ~(PE1_BIT | PE2_BIT);
+    REG_GPIO_PE_FUNC |= (PE1_BIT | PE2_BIT);
+    /* Clear func_mux back to 0 (safe default for GPIO mode) */
+    REG_GPIO_PE_FUC_L &= ~(PE1_FUNC_MASK | PE2_FUNC_MASK);
     REG_GPIO_PE_OUT |= (PE1_BIT | PE2_BIT);   /* drive HIGH (kscan idle) */
 }
 
@@ -134,27 +163,42 @@ static void hspi_init(void) {
     /* Set pad_mul_sel bit 1 (required for PE alternate functions) */
     (*(volatile uint8_t *)0x80140355) |= BIT(1);
 
+    /* Log pre-init state of critical registers for diagnosis */
+    uint8_t xip_before = REG_HSPI_XIP_CTRL;
+    uint8_t mode0_before = REG_HSPI_MODE0;
+    uint8_t trans0_before = REG_HSPI_TRANS0;
+
     /* Master mode, SPI Mode 3 (CPOL=1, CPHA=1), MSB first
-     * reg_spi_mode0 bits: [7]=master, [6]=CPOL, [5]=CPHA, [3]=LSB
-     * The existing Zephyr driver uses SPI_MODE_CPOL|SPI_MODE_CPHA (mode 3) */
+     * QMK PR#17263 changed AW20216S default to Mode 3.
+     * Zephyr AW20216S driver also uses SPI_MODE_CPOL|SPI_MODE_CPHA. */
     REG_HSPI_MODE0 = HSPI_MASTER_MODE | BIT(6) | BIT(5);  /* 0xE0 = master + mode 3 */
 
     /* Clock divider: spi_clock = source_clock / (2 * (div + 1))
-     * For ~500 KHz with 48 MHz: div = 47 → 48M/(2*48) = 500 KHz */
-    REG_HSPI_MODE1 = 47;
+     * AW20216S requires 1-10 MHz. With 48 MHz source:
+     * div=5 → 48M/(2*6) = 4 MHz (safe middle of 1-10 MHz range) */
+    REG_HSPI_MODE1 = 5;
 
     /* Disable command phase, set CS high time = 0 (minimum) */
     REG_HSPI_MODE2 = 0x00;
 
+    /* Disable HSPI address phase — without this the hardware inserts
+     * 1-4 address bytes before data, corrupting the AW20216S protocol.
+     * Also disables XIP mode and clears all other bits. */
+    REG_HSPI_XIP_CTRL = 0x00;
+
     /* No DMA, no interrupts */
     REG_HSPI_TRANS2 = 0x00;
+
+    /* Set WRITE_ONLY transmode + no dummy */
+    REG_HSPI_TRANS0 = (0x01 << 4);
 
     /* Clear FIFOs */
     REG_HSPI_FIFO_ST |= BIT(2) | BIT(3);  /* RXF_CLR | TXF_CLR */
 
-    LOG_INF("HSPI init: CLK_EN0=0x%02x MODE0=0x%02x MODE1=0x%02x PAD_MUL=0x%02x",
-            REG_CLK_EN0, REG_HSPI_MODE0, REG_HSPI_MODE1,
-            (*(volatile uint8_t *)0x80140355));
+    LOG_INF("HSPI pre-init: XIP=0x%02x MODE0=0x%02x TRANS0=0x%02x",
+            xip_before, mode0_before, trans0_before);
+    LOG_INF("HSPI post-init: MODE0=0x%02x MODE2=0x%02x XIP=0x%02x TRANS0=0x%02x",
+            REG_HSPI_MODE0, REG_HSPI_MODE2, REG_HSPI_XIP_CTRL, REG_HSPI_TRANS0);
 }
 
 static void hspi_write_bytes(const uint8_t *data, uint16_t len) {
@@ -182,56 +226,52 @@ static void hspi_write_bytes(const uint8_t *data, uint16_t len) {
     while (REG_HSPI_STATUS & HSPI_BUSY) {}
 }
 
+/* ── GPIO bit-bang SPI (diagnostic bypass of HSPI hardware) ──────────── */
+
+/*
+ * Bit-bang SPI Mode 3 (CPOL=1, CPHA=1) at ~2-4 MHz using direct GPIO writes.
+ * CLK idles HIGH. Data sampled on rising edge, changed on falling edge.
+ * At 48 MHz CPU, each register write takes ~1 cycle = ~21ns.
+ * A full bit (2 writes) = ~42ns → ~24 MHz theoretical max.
+ * With loop overhead: ~2-4 MHz actual — within AW20216S 1-10 MHz spec.
+ */
+static void bitbang_byte(uint8_t byte) {
+    for (int bit = 7; bit >= 0; bit--) {
+        /* Falling edge: change data */
+        REG_GPIO_PE_OUT &= ~PE1_BIT;  /* CLK LOW */
+        if (byte & (1 << bit)) {
+            REG_GPIO_PE_OUT |= PE2_BIT;   /* MOSI HIGH */
+        } else {
+            REG_GPIO_PE_OUT &= ~PE2_BIT;  /* MOSI LOW */
+        }
+        /* Rising edge: data sampled by slave */
+        REG_GPIO_PE_OUT |= PE1_BIT;   /* CLK HIGH */
+    }
+}
+
 static void aw_write(uint8_t chip, uint8_t page, uint8_t reg,
                      const uint8_t *data, uint16_t len) {
+    /* Ensure PE1/PE2 are in GPIO output mode (not HSPI) */
+    REG_GPIO_PE_FUNC |= (PE1_BIT | PE2_BIT);
+    REG_GPIO_PE_OEN &= ~(PE1_BIT | PE2_BIT);
+    REG_GPIO_PE_OUT |= PE1_BIT;  /* CLK idles HIGH (Mode 3) */
+
     /* Assert CS via GPIO */
     if (chip == 0) {
         REG_GPIO_PE_OUT &= ~PE0_BIT;
     } else {
         REG_GPIO_PC_OUT &= ~PC0_BIT;
     }
-    for (volatile int d = 0; d < 10; d++) {}
+    for (volatile int d = 0; d < 20; d++) {}
 
-    /*
-     * Send as ONE continuous SPI transaction: [cmd_byte][reg_addr][data...]
-     * The AW20216S requires all bytes in a single CS-low window.
-     * We set TX count for the full length, trigger, then stream all bytes.
-     */
-    uint8_t cmd_byte = AW_CMD_WRITE(page);
-    uint16_t total_len = 2 + len;
-
-    /* Clear TX FIFO */
-    REG_HSPI_FIFO_ST |= BIT(3);
-
-    /* Set TX byte count */
-    REG_HSPI_TX_CNT0 = (uint8_t)((total_len - 1) & 0xFF);
-    REG_HSPI_TX_CNT1 = (uint8_t)(((total_len - 1) >> 8) & 0xFF);
-    REG_HSPI_TX_CNT2 = (uint8_t)(((total_len - 1) >> 16) & 0xFF);
-
-    /* Write-only transfer mode */
-    REG_HSPI_TRANS0 = (REG_HSPI_TRANS0 & 0x0F) | (0x01 << 4);
-
-    /* TRIGGER transfer */
-    REG_HSPI_TRANS1 = 0x00;
-
-    /* Feed: command byte */
-    while (REG_HSPI_FIFO_ST & HSPI_TXF_FULL) {}
-    REG_HSPI_DATA(0) = cmd_byte;
-
-    /* Feed: register address */
-    while (REG_HSPI_FIFO_ST & HSPI_TXF_FULL) {}
-    REG_HSPI_DATA(1) = reg;
-
-    /* Feed: data bytes */
+    /* Send: [cmd_byte][reg_addr][data...] */
+    bitbang_byte(AW_CMD_WRITE(page));
+    bitbang_byte(reg);
     for (uint16_t i = 0; i < len; i++) {
-        while (REG_HSPI_FIFO_ST & HSPI_TXF_FULL) {}
-        REG_HSPI_DATA((i + 2) & 3) = data[i];
+        bitbang_byte(data[i]);
     }
 
-    /* Wait for all bytes clocked out */
-    while (REG_HSPI_STATUS & HSPI_BUSY) {}
-
-    for (volatile int d = 0; d < 10; d++) {}
+    for (volatile int d = 0; d < 20; d++) {}
 
     /* Deassert CS */
     REG_GPIO_PE_OUT |= PE0_BIT;
@@ -271,8 +311,8 @@ static void led_power_on(void) {
     REG_GPIO_PC_IE &= ~PC2_BIT;
     REG_GPIO_PC_OEN &= ~PC2_BIT;
     REG_GPIO_PC_OUT |= PC2_BIT;
-    k_msleep(50);  /* 50ms for LED rail to fully stabilize */
-    LOG_INF("PC2 power ON (OUT=0x%02x OEN=0x%02x)", REG_GPIO_PC_OUT, REG_GPIO_PC_OEN);
+    k_msleep(50);
+    LOG_INF("PC2 power ON (HIGH) (OUT=0x%02x OEN=0x%02x)", REG_GPIO_PC_OUT, REG_GPIO_PC_OEN);
 }
 
 static void led_power_off(void) {
@@ -288,12 +328,12 @@ static void rgb_update_frame(void) {
 
     unsigned int key = irq_lock();
 
-    pins_to_hspi();
-
+    /* GPIO bit-bang: aw_write handles pin mode internally */
     aw_write(0, AW_PAGE_PWM, 0x00, chip0_pwm, AW_PWM_CHANNELS);
     aw_write(1, AW_PAGE_PWM, 0x00, chip1_pwm, AW_PWM_CHANNELS);
 
-    pins_to_gpio();
+    /* Restore pins for kscan */
+    REG_GPIO_PE_OUT |= (PE1_BIT | PE2_BIT);
 
     irq_unlock(key);
 }
@@ -355,17 +395,24 @@ static void rgb_thread_fn(void *p1, void *p2, void *p3) {
     LOG_INF("crush80_rgb: powering on LED rail");
     led_power_on();
 
-    LOG_INF("crush80_rgb: configuring HSPI + initializing AW20216S");
+    LOG_INF("crush80_rgb: configuring GPIO bit-bang SPI + initializing AW20216S");
 
     unsigned int key = irq_lock();
 
-    pins_to_hspi();
-    hspi_init();
+    /* GPIO bit-bang mode: keep PE1/PE2 in GPIO mode, ensure output enabled */
+    REG_GPIO_PE_FUNC |= (PE1_BIT | PE2_BIT);  /* GPIO mode */
+    REG_GPIO_PE_OEN &= ~(PE1_BIT | PE2_BIT | PE0_BIT);  /* output enable */
+    REG_GPIO_PE_OUT |= (PE1_BIT | PE0_BIT);   /* CLK HIGH idle, CS HIGH */
+    REG_GPIO_PC_OEN &= ~PC0_BIT;             /* PC0 CS output */
+    REG_GPIO_PC_OUT |= PC0_BIT;              /* PC0 CS HIGH */
+
+    LOG_INF("GPIO bitbang: PE_FUNC=0x%02x PE_OEN=0x%02x PE_OUT=0x%02x",
+            REG_GPIO_PE_FUNC, REG_GPIO_PE_OEN, REG_GPIO_PE_OUT);
     aw_chip_init(0);
-    LOG_INF("After chip0 init: HSPI_STATUS=0x%02x FIFO_ST=0x%02x FIFO_NUM=0x%02x",
-            REG_HSPI_STATUS, REG_HSPI_FIFO_ST, REG_HSPI_FIFO_NUM);
+    LOG_INF("After chip0 init (bitbang): done");
     aw_chip_init(1);
-    pins_to_gpio();
+
+    irq_unlock(key);
 
     irq_unlock(key);
 
