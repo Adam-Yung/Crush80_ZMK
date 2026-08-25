@@ -33,11 +33,11 @@
 #define FN       1
 #define NAV      2
 #define EXTNAV   3
-#define SYM      4
-#define NATIVE   5
-#define MAC      6
-#define MACNAV   7
-#define MACEXTNAV 8
+#define NATIVE   4
+#define MAC      5
+#define MACNAV   6
+#define MACEXTNAV 7
+#define SYM      8
 
 /*
  * Key position indices for hold-trigger-key-positions (bilateral HRM).
@@ -150,6 +150,17 @@
 	};
 
 	macros {
+		/*
+		 * Dummy password: w0rkloveLoveF!!!
+		 */
+		dummy_pw: dummy_pw {
+			compatible = "zmk,behavior-macro";
+			#binding-cells = <0>;
+			wait-ms = <10>;
+			tap-ms = <10>;
+			bindings = <&kp W &kp N0 &kp R &kp K &kp L &kp O &kp V &kp E &kp L &kp O &kp V &kp E &kp LS(F) &kp LS(N1) &kp LS(N1) &kp LS(N1)>;
+		};
+
 		/*
 		 * Select Word: Ctrl+Left then Shift+Ctrl+Right (Linux/Windows)
 		 */
@@ -300,8 +311,8 @@
 				&out OUT_TOG  &trans        &trans        &trans        &trans
 				&trans        &trans        &trans        &rgb_ug RGB_TOG
 				&bt BT_CLR    &trans        &trans
-				/* Row 2: Fn+\=RGB effect */
-				&trans        &trans        &trans        &trans        &trans
+			/* Row 2: Fn+Q=password, Fn+\=RGB effect */
+			&trans        &dummy_pw     &trans        &trans        &trans
 				&trans        &trans        &trans        &trans        &trans
 				&trans        &trans        &trans        &rgb_ug RGB_EFF
 				&trans        &trans        &trans
@@ -398,45 +409,6 @@
 		};
 
 		/*
-		 * Layer 4: Sym (hold Caps or Apostrophe)
-		 * Left: numbers (456 top, 789 home, 0. bottom) + coding macros
-		 * Right: brackets, punctuation, operators
-		 * Space = Shift (for capitals without releasing layer key)
-		 */
-		sym_layer {
-			display-name = "Sym";
-			bindings = <
-				/* Row 0: pass through */
-				&trans        &trans        &trans        &trans        &trans
-				&trans        &trans        &trans        &trans
-				&trans        &trans        &trans        &trans
-				&trans        &trans        &trans
-				/* Row 1: number row symbols (` 1 2 3 $ % ^ & * ( ) . = _) */
-				&kp GRAVE     &kp N1        &kp N2        &kp N3        &kp LS(N4)
-				&kp LS(N5)    &kp LS(N6)    &kp LS(N7)    &kp LS(N8)    &kp LS(N9)
-				&kp LS(N0)    &kp DOT       &trans        &trans
-				&trans        &trans        &trans
-				/* Row 2: left=4,5,6,->,lambda | right=() =>, (, ), [, ] */
-				&kp SPACE     &kp N4        &kp N5        &kp N6        &c_arw
-				&lambda       &fn_arw       &kp LS(N9)    &kp LS(N0)    &kp LBKT
-				&kp RBKT      &none         &none         &none
-				&trans        &trans        &trans
-				/* Row 3: left=_,7,8,9,-,+ | right==,comma,dot,?,',bspc */
-				&none         &kp N7        &kp N8        &kp N9        &kp MINUS
-				&kp LS(EQUAL) &kp EQUAL     &kp COMMA     &kp DOT       &kp LS(FSLH)
-				&kp SQT       &kp BSPC                    &trans
-				/* Row 4: Shift, Undo, 0, dot, \, |, /, _, _, _, _ */
-				&kp LSHFT                   &kp LC(Z)     &kp N0        &kp DOT
-				&kp BSLH      &kp LS(BSLH)  &kp FSLH      &none         &none
-				&none         &none                       &kp RSHFT     &trans
-				/* Row 5: pass mods, Space=Shift, right thumb=0,dot */
-				&kp LCTRL     &kp LGUI      &trans                      &kp LSHFT
-				&kp N0        &kp DOT       &kp RCTRL
-				&trans        &trans        &trans
-			>;
-		};
-
-		/*
 		 * Layer 5: Native (full passthrough — no remapping)
 		 * Toggle on/off with ScrLk position (tog NATIVE in base, tog NATIVE here)
 		 */
@@ -493,8 +465,8 @@
 				&trans        &trans        &trans        &trans        &trans
 				&trans        &trans        &trans        &trans
 				&trans        &trans        &trans
-				/* Row 2: only W is overridden to use MacNav */
-				&trans        &trans        &lt_mac_nav MACNAV W &trans &trans
+			/* Row 2: only W is overridden to use MacNav */
+			&trans        &trans        &lt_mac_nav MACNAV W &trans &trans
 				&trans        &trans        &trans        &trans        &trans
 				&trans        &trans        &trans        &trans
 				&trans        &trans        &trans
@@ -587,6 +559,46 @@
 				/* Row 5: mods pass through, Space is held (layer active) */
 				&kp LCTRL     &kp LGUI      &kp LALT                    &none
 				&trans        &trans        &kp RCTRL
+				&trans        &trans        &trans
+			>;
+		};
+
+		/*
+		 * Layer 8: Sym (hold Caps or Apostrophe)
+		 * Highest layer index — always wins over Mac/Native when active.
+		 * Left: numbers (456 top, 789 home, 0. bottom) + coding macros
+		 * Right: brackets, punctuation, operators
+		 * Space = Shift (for capitals without releasing layer key)
+		 */
+		sym_layer {
+			display-name = "Sym";
+			bindings = <
+				/* Row 0: pass through */
+				&trans        &trans        &trans        &trans        &trans
+				&trans        &trans        &trans        &trans
+				&trans        &trans        &trans        &trans
+				&trans        &trans        &trans
+				/* Row 1: number row symbols (` 1 2 3 $ % ^ & * ( ) . = _) */
+				&kp GRAVE     &kp N1        &kp N2        &kp N3        &kp LS(N4)
+				&kp LS(N5)    &kp LS(N6)    &kp LS(N7)    &kp LS(N8)    &kp LS(N9)
+				&kp LS(N0)    &kp DOT       &trans        &trans
+				&trans        &trans        &trans
+				/* Row 2: left=4,5,6,->,lambda | right=() =>, (, ), [, ] */
+				&kp SPACE     &kp N4        &kp N5        &kp N6        &c_arw
+				&lambda       &fn_arw       &kp LS(N9)    &kp LS(N0)    &kp LBKT
+				&kp RBKT      &none         &none         &none
+				&trans        &trans        &trans
+				/* Row 3: left=_,7,8,9,-,+ | right==,comma,dot,?,',bspc */
+				&none         &kp N7        &kp N8        &kp N9        &kp MINUS
+				&kp LS(EQUAL) &kp EQUAL     &kp COMMA     &kp DOT       &kp LS(FSLH)
+				&kp SQT       &kp BSPC                    &trans
+				/* Row 4: Shift, Undo, 0, dot, \, |, /, _, _, _, _ */
+				&kp LSHFT                   &kp LC(Z)     &kp N0        &kp DOT
+				&kp BSLH      &kp LS(BSLH)  &kp FSLH      &none         &none
+				&none         &none                       &kp RSHFT     &trans
+				/* Row 5: pass mods, Space=Shift, right thumb=0,dot */
+				&kp LCTRL     &kp LGUI      &trans                      &kp LSHFT
+				&kp N0        &kp DOT       &kp RCTRL
 				&trans        &trans        &trans
 			>;
 		};
