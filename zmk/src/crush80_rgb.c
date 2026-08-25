@@ -1,17 +1,20 @@
 /*
- * Crush80 RGB LED Driver — AW20216S via GPIO bit-bang SPI
+ * Crush80 RGB LED Driver — AW20216S via HSPI Hardware
  *
- * PE0 = CS chip 0 (active low)  — shared with kscan column 0
- * PE1 = CLK                     — shared with kscan column 1
- * PE2 = MOSI                    — shared with kscan column 2
- * PC0 = CS chip 1 (active low)  — shared with kscan column 13
- * PC2 = LED power MOSFET (active high) — dedicated, not kscan
+ * Uses the B91's HSPI hardware peripheral to communicate with the AW20216S.
+ * PE1 (CLK) and PE2 (MOSI) are temporarily switched from GPIO mode (kscan)
+ * to HSPI alternate function mode during each SPI transfer, then restored.
  *
- * Strategy: kscan configures PE0/PE1/PE2/PC0 as outputs (col2row columns,
- * driven HIGH when idle, driven LOW during scan). We reuse these pins for
- * SPI under irq_lock (preventing kscan from scanning during our ~4ms frame).
- * We only change the OUT register — never touch OEN/IE/direction.
- * After SPI, we restore all pins to HIGH (kscan idle state).
+ * Pin assignments:
+ *   PE0 = CS chip 0 (GPIO manual, active low) — shared with kscan col 0
+ *   PE1 = HSPI CLK (FUNC_C alt) — shared with kscan col 1
+ *   PE2 = HSPI MOSI (FUNC_C alt) — shared with kscan col 2
+ *   PC0 = CS chip 1 (GPIO manual, active low) — shared with kscan col 13
+ *   PC2 = LED power MOSFET (GPIO, active high) — dedicated
+ *
+ * Safety: all pin switching happens under irq_lock (kscan cannot scan).
+ * The thread starts 2s after boot (USB/BLE already up).
+ * If anything goes wrong, MCUmgr is still accessible for recovery.
  */
 
 #include <zephyr/kernel.h>
@@ -22,153 +25,254 @@
 
 LOG_MODULE_REGISTER(crush80_rgb, LOG_LEVEL_INF);
 
-/* B91 GPIO register addresses (direct memory-mapped) */
-#define REG_GPIO_PE_OUT    (*(volatile uint8_t *)0x80140321)
-#define REG_GPIO_PE_OEN    (*(volatile uint8_t *)0x80140322)
+/* ── B91 GPIO registers ──────────────────────────────────────────────── */
 
-#define REG_GPIO_PC_OUT    (*(volatile uint8_t *)0x80140311)
-#define REG_GPIO_PC_OEN    (*(volatile uint8_t *)0x80140312)
-#define REG_GPIO_PC_IE     (*(volatile uint8_t *)0x80140313)
-#define REG_GPIO_PC_GPIO   (*(volatile uint8_t *)0x80140310)
+#define REG_GPIO_PE_OUT   (*(volatile uint8_t *)0x80140321)
+#define REG_GPIO_PE_OEN   (*(volatile uint8_t *)0x80140322)
+#define REG_GPIO_PE_IE    (*(volatile uint8_t *)0x80140323)
+#define REG_GPIO_PE_FUNC  (*(volatile uint8_t *)0x80140326)  /* GPIO function: 1=GPIO, 0=alt */
+
+#define REG_GPIO_PC_OUT   (*(volatile uint8_t *)0x80140311)
+#define REG_GPIO_PC_OEN   (*(volatile uint8_t *)0x80140312)
+#define REG_GPIO_PC_IE    (*(volatile uint8_t *)0x80140313)
 
 /* Pin bitmasks */
 #define PE0_BIT  0x01  /* CS chip 0 */
-#define PE1_BIT  0x02  /* CLK */
-#define PE2_BIT  0x04  /* MOSI */
+#define PE1_BIT  0x02  /* HSPI CLK */
+#define PE2_BIT  0x04  /* HSPI MOSI */
 #define PC0_BIT  0x01  /* CS chip 1 */
 #define PC2_BIT  0x04  /* LED power MOSFET */
 
-/* AW20216S register pages */
-#define AW_PAGE_FUNC   0xC0
-#define AW_PAGE_PWM    0xC1
-#define AW_PAGE_SCALE  0xC2
+/* ── HSPI hardware registers (base 0x81FFFFC0) ───────────────────────── */
 
-/* AW20216S function registers */
-#define AW_REG_CONFIG   0x00
-#define AW_REG_GCC      0x01
+#define HSPI_BASE          0x81FFFFC0
 
-/* SPI address byte: bit7=0 write, bit7=1 read */
-#define AW_WRITE(page)  ((page) & 0x7F)
-#define AW_ADDR(reg)    (reg)
+#define REG_HSPI_MODE0     (*(volatile uint8_t *)(HSPI_BASE + 0x00))
+#define REG_HSPI_MODE1     (*(volatile uint8_t *)(HSPI_BASE + 0x01))  /* clock divider */
+#define REG_HSPI_MODE2     (*(volatile uint8_t *)(HSPI_BASE + 0x02))
+#define REG_HSPI_TX_CNT0   (*(volatile uint8_t *)(HSPI_BASE + 0x03))
+#define REG_HSPI_TX_CNT1   (*(volatile uint8_t *)(HSPI_BASE + 0x20))  /* different offset for HSPI! */
+#define REG_HSPI_TX_CNT2   (*(volatile uint8_t *)(HSPI_BASE + 0x21))
+#define REG_HSPI_TRANS0    (*(volatile uint8_t *)(HSPI_BASE + 0x05))
+#define REG_HSPI_TRANS1    (*(volatile uint8_t *)(HSPI_BASE + 0x06))  /* cmd reg = TRIGGER */
+#define REG_HSPI_TRANS2    (*(volatile uint8_t *)(HSPI_BASE + 0x07))
+#define REG_HSPI_DATA(n)   (*(volatile uint8_t *)(HSPI_BASE + 0x08 + (n)))
+#define REG_HSPI_FIFO_NUM  (*(volatile uint8_t *)(HSPI_BASE + 0x0C))
+#define REG_HSPI_FIFO_ST   (*(volatile uint8_t *)(HSPI_BASE + 0x0D))
+#define REG_HSPI_IRQ_ST    (*(volatile uint8_t *)(HSPI_BASE + 0x0E))
+#define REG_HSPI_STATUS    (*(volatile uint8_t *)(HSPI_BASE + 0x0F))
 
-/* Frame buffer: 3 bytes (R,G,B) per LED */
-static uint8_t led_pwm[CRUSH80_LED_COUNT_TOTAL * 3];
+/* HSPI clock enable */
+#define REG_CLK_EN0        (*(volatile uint8_t *)0x801401E4)
+#define CLK0_HSPI_EN       BIT(0)
+
+/* HSPI MODE0 bits */
+#define HSPI_MASTER_MODE   BIT(7)
+
+/* HSPI FIFO_ST bits */
+#define HSPI_TXF_FULL      BIT(6)
+
+/* HSPI STATUS bits */
+#define HSPI_BUSY          BIT(7)
+
+/* ── AW20216S protocol ───────────────────────────────────────────────── */
+
+/*
+ * Command byte: [1010][page(3 bits)][W/R]
+ * Page 0 = config, Page 1 = PWM, Page 2 = scaling
+ */
+#define AW_CMD_WRITE(page)  (0xA0 | (((page) & 0x07) << 1))
+
+#define AW_PAGE_CONFIG  0
+#define AW_PAGE_PWM     1
+#define AW_PAGE_SCALE   2
+
+#define AW_REG_GCR      0x00  /* Global config: bit0=CHIPEN */
+#define AW_REG_GCCR     0x01  /* Global current 0x00-0xFF */
+#define AW_REG_RSTN     0x2F  /* Software reset: write 0xAE */
+#define AW_RESET_VAL    0xAE
+
+#define AW_PWM_CHANNELS 216
+
+/* ── Frame buffer ────────────────────────────────────────────────────── */
+
+static uint8_t chip0_pwm[AW_PWM_CHANNELS];
+static uint8_t chip1_pwm[AW_PWM_CHANNELS];
 static bool rgb_enabled = true;
 static bool rgb_initialized;
 
-/* Thread stack and scheduling */
-#define RGB_STACK_SIZE 1024
+/* Thread */
+#define RGB_STACK_SIZE     1536
 #define RGB_THREAD_PRIORITY 10
-#define RGB_REFRESH_MS 33  /* ~30 Hz */
+#define RGB_REFRESH_MS     33
 
 static K_THREAD_STACK_DEFINE(rgb_stack, RGB_STACK_SIZE);
 static struct k_thread rgb_thread_data;
 
-/* ── GPIO pin management ─────────────────────────────────────────────── */
+/* ── Pin management ──────────────────────────────────────────────────── */
 
-static inline void spi_pins_acquire(void) {
-    /*
-     * The kscan driver toggles OEN per-scan: columns are in INPUT mode (OEN=1)
-     * between scans, and briefly set to OUTPUT (OEN=0) during each column's
-     * scan slot. Since we hold irq_lock, kscan can't run, so columns are in
-     * input mode. We must enable output (OEN=0) to actually drive the SPI pins.
-     */
-    REG_GPIO_PE_OEN &= ~(PE0_BIT | PE1_BIT | PE2_BIT);  /* enable output */
-    REG_GPIO_PC_OEN &= ~PC0_BIT;                         /* enable output */
-
-    /* SPI idle state */
-    REG_GPIO_PE_OUT |= PE0_BIT;   /* CS0 high (deasserted) */
-    REG_GPIO_PE_OUT &= ~PE1_BIT;  /* CLK low */
-    REG_GPIO_PE_OUT &= ~PE2_BIT;  /* MOSI low */
-    REG_GPIO_PC_OUT |= PC0_BIT;   /* CS1 high (deasserted) */
+static inline void pins_to_hspi(void) {
+    /* Switch PE1/PE2 from GPIO to HSPI alternate function (FUNC_C).
+     * SDK's hspi_set_pin_mux() does both gpio_function_dis + gpio_input_en. */
+    REG_GPIO_PE_FUNC &= ~(PE1_BIT | PE2_BIT);  /* disable GPIO function → alt mode */
+    REG_GPIO_PE_IE |= (PE1_BIT | PE2_BIT);     /* enable input (required for HSPI output driver) */
 }
 
-static inline void spi_pins_release(void) {
-    /*
-     * Restore all SPI pins to HIGH first (safe state for kscan active-low).
-     * Then disable output (OEN=1) — kscan expects columns in input mode
-     * between scans and will re-enable output during its own scan slots.
-     */
-    REG_GPIO_PE_OUT |= (PE0_BIT | PE1_BIT | PE2_BIT);  /* all HIGH */
-    REG_GPIO_PC_OUT |= PC0_BIT;                         /* PC0 HIGH */
-
-    REG_GPIO_PE_OEN |= (PE0_BIT | PE1_BIT | PE2_BIT);  /* disable output (input mode) */
-    REG_GPIO_PC_OEN |= PC0_BIT;                         /* disable output (input mode) */
+static inline void pins_to_gpio(void) {
+    /* Restore PE1/PE2 to GPIO mode for kscan */
+    REG_GPIO_PE_IE &= ~(PE1_BIT | PE2_BIT);   /* disable input (kscan uses output mode) */
+    REG_GPIO_PE_FUNC |= (PE1_BIT | PE2_BIT);  /* enable GPIO function */
+    REG_GPIO_PE_OUT |= (PE1_BIT | PE2_BIT);   /* drive HIGH (kscan idle) */
 }
 
-/* ── SPI bit-bang ────────────────────────────────────────────────────── */
+/* ── HSPI hardware SPI ───────────────────────────────────────────────── */
 
-static inline void spi_write_byte(uint8_t data) {
-    for (int i = 7; i >= 0; i--) {
-        if (data & (1 << i)) {
-            REG_GPIO_PE_OUT |= PE2_BIT;
-        } else {
-            REG_GPIO_PE_OUT &= ~PE2_BIT;
-        }
-        REG_GPIO_PE_OUT |= PE1_BIT;   /* CLK high — data latched on rising edge */
-        REG_GPIO_PE_OUT &= ~PE1_BIT;  /* CLK low */
+static void hspi_init(void) {
+    /* Enable HSPI peripheral clock */
+    REG_CLK_EN0 |= CLK0_HSPI_EN;
+
+    /* Set pad_mul_sel bit 1 (required for PE alternate functions) */
+    (*(volatile uint8_t *)0x80140355) |= BIT(1);
+
+    /* Master mode, SPI Mode 3 (CPOL=1, CPHA=1), MSB first
+     * reg_spi_mode0 bits: [7]=master, [6]=CPOL, [5]=CPHA, [3]=LSB
+     * The existing Zephyr driver uses SPI_MODE_CPOL|SPI_MODE_CPHA (mode 3) */
+    REG_HSPI_MODE0 = HSPI_MASTER_MODE | BIT(6) | BIT(5);  /* 0xE0 = master + mode 3 */
+
+    /* Clock divider: spi_clock = source_clock / (2 * (div + 1))
+     * For ~500 KHz with 48 MHz: div = 47 → 48M/(2*48) = 500 KHz */
+    REG_HSPI_MODE1 = 47;
+
+    /* Disable command phase, set CS high time = 0 (minimum) */
+    REG_HSPI_MODE2 = 0x00;
+
+    /* No DMA, no interrupts */
+    REG_HSPI_TRANS2 = 0x00;
+
+    /* Clear FIFOs */
+    REG_HSPI_FIFO_ST |= BIT(2) | BIT(3);  /* RXF_CLR | TXF_CLR */
+
+    LOG_INF("HSPI init: CLK_EN0=0x%02x MODE0=0x%02x MODE1=0x%02x PAD_MUL=0x%02x",
+            REG_CLK_EN0, REG_HSPI_MODE0, REG_HSPI_MODE1,
+            (*(volatile uint8_t *)0x80140355));
+}
+
+static void hspi_write_bytes(const uint8_t *data, uint16_t len) {
+    /* Clear TX FIFO */
+    REG_HSPI_FIFO_ST |= BIT(3);
+
+    /* Set TX byte count (24-bit, len-1 format) */
+    REG_HSPI_TX_CNT0 = (uint8_t)((len - 1) & 0xFF);
+    REG_HSPI_TX_CNT1 = (uint8_t)(((len - 1) >> 8) & 0xFF);
+    REG_HSPI_TX_CNT2 = (uint8_t)(((len - 1) >> 16) & 0xFF);
+
+    /* Set transfer mode: write-only (0x1 << 4) */
+    REG_HSPI_TRANS0 = (REG_HSPI_TRANS0 & 0x0F) | (0x01 << 4);
+
+    /* TRIGGER: write command register starts the transfer */
+    REG_HSPI_TRANS1 = 0x00;
+
+    /* Feed data to TX FIFO — hardware clocks it out as we feed */
+    for (uint16_t i = 0; i < len; i++) {
+        while (REG_HSPI_FIFO_ST & HSPI_TXF_FULL) {}
+        REG_HSPI_DATA(i & 3) = data[i];
     }
+
+    /* Wait for transfer to complete */
+    while (REG_HSPI_STATUS & HSPI_BUSY) {}
 }
 
-static void aw_write_reg(uint8_t chip, uint8_t page, uint8_t reg,
-                         const uint8_t *data, uint8_t len) {
-    /* Select page */
+static void aw_write(uint8_t chip, uint8_t page, uint8_t reg,
+                     const uint8_t *data, uint16_t len) {
+    /* Assert CS via GPIO */
     if (chip == 0) {
-        REG_GPIO_PE_OUT &= ~PE0_BIT;  /* CS0 low */
+        REG_GPIO_PE_OUT &= ~PE0_BIT;
     } else {
-        REG_GPIO_PC_OUT &= ~PC0_BIT;  /* CS1 low */
+        REG_GPIO_PC_OUT &= ~PC0_BIT;
     }
-    spi_write_byte(AW_WRITE(page));
-    spi_write_byte(reg);
-    for (uint8_t i = 0; i < len; i++) {
-        spi_write_byte(data[i]);
+    for (volatile int d = 0; d < 10; d++) {}
+
+    /*
+     * Send as ONE continuous SPI transaction: [cmd_byte][reg_addr][data...]
+     * The AW20216S requires all bytes in a single CS-low window.
+     * We set TX count for the full length, trigger, then stream all bytes.
+     */
+    uint8_t cmd_byte = AW_CMD_WRITE(page);
+    uint16_t total_len = 2 + len;
+
+    /* Clear TX FIFO */
+    REG_HSPI_FIFO_ST |= BIT(3);
+
+    /* Set TX byte count */
+    REG_HSPI_TX_CNT0 = (uint8_t)((total_len - 1) & 0xFF);
+    REG_HSPI_TX_CNT1 = (uint8_t)(((total_len - 1) >> 8) & 0xFF);
+    REG_HSPI_TX_CNT2 = (uint8_t)(((total_len - 1) >> 16) & 0xFF);
+
+    /* Write-only transfer mode */
+    REG_HSPI_TRANS0 = (REG_HSPI_TRANS0 & 0x0F) | (0x01 << 4);
+
+    /* TRIGGER transfer */
+    REG_HSPI_TRANS1 = 0x00;
+
+    /* Feed: command byte */
+    while (REG_HSPI_FIFO_ST & HSPI_TXF_FULL) {}
+    REG_HSPI_DATA(0) = cmd_byte;
+
+    /* Feed: register address */
+    while (REG_HSPI_FIFO_ST & HSPI_TXF_FULL) {}
+    REG_HSPI_DATA(1) = reg;
+
+    /* Feed: data bytes */
+    for (uint16_t i = 0; i < len; i++) {
+        while (REG_HSPI_FIFO_ST & HSPI_TXF_FULL) {}
+        REG_HSPI_DATA((i + 2) & 3) = data[i];
     }
-    REG_GPIO_PE_OUT |= PE0_BIT;   /* CS0 high */
-    REG_GPIO_PC_OUT |= PC0_BIT;   /* CS1 high */
+
+    /* Wait for all bytes clocked out */
+    while (REG_HSPI_STATUS & HSPI_BUSY) {}
+
+    for (volatile int d = 0; d < 10; d++) {}
+
+    /* Deassert CS */
+    REG_GPIO_PE_OUT |= PE0_BIT;
+    REG_GPIO_PC_OUT |= PC0_BIT;
+
+    for (volatile int d = 0; d < 20; d++) {}
 }
 
-static void aw_write_reg_single(uint8_t chip, uint8_t page,
-                                uint8_t reg, uint8_t val) {
-    aw_write_reg(chip, page, reg, &val, 1);
+static inline void aw_write_single(uint8_t chip, uint8_t page,
+                                   uint8_t reg, uint8_t val) {
+    aw_write(chip, page, reg, &val, 1);
 }
 
 /* ── AW20216S initialization ─────────────────────────────────────────── */
 
 static void aw_chip_init(uint8_t chip) {
-    /* Software reset (config reg bit 0) */
-    aw_write_reg_single(chip, AW_PAGE_FUNC, AW_REG_CONFIG, 0x01);
-    k_busy_wait(2000);  /* 2ms for reset */
+    aw_write_single(chip, AW_PAGE_CONFIG, AW_REG_RSTN, AW_RESET_VAL);
+    k_busy_wait(2000);
 
-    /* Enable chip: CHIPEN=1 (bit 0 of config after reset) */
-    aw_write_reg_single(chip, AW_PAGE_FUNC, AW_REG_CONFIG, 0x01);
+    aw_write_single(chip, AW_PAGE_CONFIG, AW_REG_GCR, 0x01);
+    aw_write_single(chip, AW_PAGE_CONFIG, AW_REG_GCCR, 0xFF);
 
-    /* Set global current control to max (0xFF) */
-    aw_write_reg_single(chip, AW_PAGE_FUNC, AW_REG_GCC, 0xFF);
+    /* All scaling to max */
+    uint8_t scaling[AW_PWM_CHANNELS];
+    memset(scaling, 0xFF, sizeof(scaling));
+    aw_write(chip, AW_PAGE_SCALE, 0x00, scaling, AW_PWM_CHANNELS);
 
-    /* Enable all 216 channels via scaling page (set all to 0xFF) */
-    uint8_t all_on[18];
-    memset(all_on, 0xFF, sizeof(all_on));
-    for (uint8_t sw = 0; sw < 12; sw++) {
-        aw_write_reg(chip, AW_PAGE_SCALE, sw * 18, all_on, 18);
-    }
-
-    /* Clear all PWM values */
-    uint8_t all_off[18];
-    memset(all_off, 0x00, sizeof(all_off));
-    for (uint8_t sw = 0; sw < 12; sw++) {
-        aw_write_reg(chip, AW_PAGE_PWM, sw * 18, all_off, 18);
-    }
+    /* All PWM off */
+    uint8_t zeros[AW_PWM_CHANNELS];
+    memset(zeros, 0x00, sizeof(zeros));
+    aw_write(chip, AW_PAGE_PWM, 0x00, zeros, AW_PWM_CHANNELS);
 }
 
 /* ── LED power control ───────────────────────────────────────────────── */
 
 static void led_power_on(void) {
-    /* PC2 is the LED power MOSFET gate — set as output, drive high */
     REG_GPIO_PC_IE &= ~PC2_BIT;
-    REG_GPIO_PC_GPIO |= PC2_BIT;
     REG_GPIO_PC_OEN &= ~PC2_BIT;
     REG_GPIO_PC_OUT |= PC2_BIT;
-    k_msleep(5);  /* Let power rail stabilize */
+    k_msleep(50);  /* 50ms for LED rail to fully stabilize */
+    LOG_INF("PC2 power ON (OUT=0x%02x OEN=0x%02x)", REG_GPIO_PC_OUT, REG_GPIO_PC_OEN);
 }
 
 static void led_power_off(void) {
@@ -184,46 +288,12 @@ static void rgb_update_frame(void) {
 
     unsigned int key = irq_lock();
 
-    spi_pins_acquire();
+    pins_to_hspi();
 
-    /*
-     * Write PWM data to chip 0 (LEDs 0-90, 91 LEDs × 3 channels = 273 bytes).
-     * AW20216S has 12 SW rows × 18 CS columns = 216 channels per chip.
-     * We write in 18-byte chunks per SW row.
-     */
-    for (uint8_t sw = 0; sw < 12; sw++) {
-        uint8_t buf[18];
-        uint16_t base = sw * 18;
+    aw_write(0, AW_PAGE_PWM, 0x00, chip0_pwm, AW_PWM_CHANNELS);
+    aw_write(1, AW_PAGE_PWM, 0x00, chip1_pwm, AW_PWM_CHANNELS);
 
-        for (uint8_t cs = 0; cs < 18; cs++) {
-            uint16_t ch_idx = base + cs;
-            if (ch_idx < CRUSH80_LED_COUNT_CHIP0 * 3) {
-                buf[cs] = led_pwm[ch_idx];
-            } else {
-                buf[cs] = 0;
-            }
-        }
-        aw_write_reg(0, AW_PAGE_PWM, sw * 18, buf, 18);
-    }
-
-    /* Write PWM data to chip 1 (LEDs 91-153, underglow) */
-    for (uint8_t sw = 0; sw < 12; sw++) {
-        uint8_t buf[18];
-        uint16_t base = sw * 18;
-
-        for (uint8_t cs = 0; cs < 18; cs++) {
-            uint16_t ch_idx = base + cs;
-            uint16_t led_offset = CRUSH80_LED_COUNT_CHIP0 * 3 + ch_idx;
-            if (ch_idx < CRUSH80_LED_COUNT_CHIP1 * 3) {
-                buf[cs] = led_pwm[led_offset];
-            } else {
-                buf[cs] = 0;
-            }
-        }
-        aw_write_reg(1, AW_PAGE_PWM, sw * 18, buf, 18);
-    }
-
-    spi_pins_release();
+    pins_to_gpio();
 
     irq_unlock(key);
 }
@@ -234,10 +304,21 @@ void crush80_rgb_set_led(uint8_t index, uint8_t r, uint8_t g, uint8_t b) {
     if (index >= CRUSH80_LED_COUNT_TOTAL) {
         return;
     }
-    uint16_t offset = (uint16_t)index * 3;
-    led_pwm[offset + 0] = r;
-    led_pwm[offset + 1] = g;
-    led_pwm[offset + 2] = b;
+    uint16_t ch_offset = (uint16_t)index * 3;
+    if (index < 72) {
+        if (ch_offset + 2 < AW_PWM_CHANNELS) {
+            chip0_pwm[ch_offset + 0] = r;
+            chip0_pwm[ch_offset + 1] = g;
+            chip0_pwm[ch_offset + 2] = b;
+        }
+    } else {
+        uint16_t offset = (uint16_t)(index - 72) * 3;
+        if (offset + 2 < AW_PWM_CHANNELS) {
+            chip1_pwm[offset + 0] = r;
+            chip1_pwm[offset + 1] = g;
+            chip1_pwm[offset + 2] = b;
+        }
+    }
 }
 
 void crush80_rgb_set_all(uint8_t r, uint8_t g, uint8_t b) {
@@ -249,7 +330,8 @@ void crush80_rgb_set_all(uint8_t r, uint8_t g, uint8_t b) {
 void crush80_rgb_toggle(void) {
     rgb_enabled = !rgb_enabled;
     if (!rgb_enabled) {
-        memset(led_pwm, 0, sizeof(led_pwm));
+        memset(chip0_pwm, 0, sizeof(chip0_pwm));
+        memset(chip1_pwm, 0, sizeof(chip1_pwm));
         rgb_update_frame();
         led_power_off();
     } else {
@@ -268,35 +350,36 @@ static void rgb_thread_fn(void *p1, void *p2, void *p3) {
     ARG_UNUSED(p2);
     ARG_UNUSED(p3);
 
-    /* Wait for system init to complete */
     k_msleep(2000);
 
-    LOG_INF("crush80_rgb: starting init");
-
-    /* Power on LED rail */
+    LOG_INF("crush80_rgb: powering on LED rail");
     led_power_on();
 
-    /* Initialize both AW20216S chips */
+    LOG_INF("crush80_rgb: configuring HSPI + initializing AW20216S");
+
     unsigned int key = irq_lock();
-    spi_pins_acquire();
+
+    pins_to_hspi();
+    hspi_init();
     aw_chip_init(0);
+    LOG_INF("After chip0 init: HSPI_STATUS=0x%02x FIFO_ST=0x%02x FIFO_NUM=0x%02x",
+            REG_HSPI_STATUS, REG_HSPI_FIFO_ST, REG_HSPI_FIFO_NUM);
     aw_chip_init(1);
-    spi_pins_release();
+    pins_to_gpio();
+
     irq_unlock(key);
 
     rgb_initialized = true;
-    LOG_INF("crush80_rgb: init complete, setting test color");
+    LOG_INF("crush80_rgb: init complete, PE_FUNC=0x%02x", REG_GPIO_PE_FUNC);
 
-    /* Initial test: set all per-key LEDs to warm white at low brightness */
-    for (uint8_t i = 0; i < CRUSH80_LED_COUNT_CHIP0; i++) {
-        crush80_rgb_set_led(i, 40, 30, 15);
-    }
-    /* Underglow: dim warm white */
-    for (uint8_t i = CRUSH80_LED_COUNT_CHIP0; i < CRUSH80_LED_COUNT_TOTAL; i++) {
-        crush80_rgb_set_led(i, 25, 20, 10);
-    }
+    /* Test pattern: all PWM to max */
+    memset(chip0_pwm, 0xFF, sizeof(chip0_pwm));
+    memset(chip1_pwm, 0xFF, sizeof(chip1_pwm));
 
-    /* Main refresh loop */
+    LOG_INF("crush80_rgb: starting first frame");
+    rgb_update_frame();
+    LOG_INF("crush80_rgb: first frame done, entering loop");
+
     while (1) {
         if (rgb_enabled) {
             rgb_update_frame();
@@ -313,7 +396,6 @@ static int crush80_rgb_sys_init(void) {
                     rgb_thread_fn, NULL, NULL, NULL,
                     RGB_THREAD_PRIORITY, 0, K_NO_WAIT);
     k_thread_name_set(&rgb_thread_data, "crush80_rgb");
-
     LOG_INF("crush80_rgb: thread created");
     return 0;
 }

@@ -475,38 +475,41 @@
 
 		/*
 		 * Layer 6: Mac Base (toggle Fn+M)
-		 * Identical to Base except W-hold activates MacNav instead of Nav.
+		 * Transparent layer — only overrides W to activate MacNav.
+		 * All other keys fall through to Base (layer 0), allowing Fn (layer 1)
+		 * to work correctly since layer 1 < layer 6 but > layer 0.
+		 * ZMK evaluates layers highest-first, so &trans here lets lower layers work.
 		 */
 		mac_layer {
 			display-name = "Mac";
 			bindings = <
-				/* Row 0: F-row (media keys, ScrLk=toggle native) */
-				&kp ESC       &kp C_BRI_DN  &kp C_BRI_UP  &kp F3        &kp F4
-				&kp F5        &kp F6        &kp C_PREV    &kp C_PP
-				&kp C_NEXT    &kp C_MUTE    &kp C_VOL_DN  &kp C_VOL_UP
-				&kp PSCRN     &tog NATIVE   &kp PAUSE_BREAK
-				/* Row 1: number row + nav cluster */
-				&kp GRAVE     &kp N1        &kp N2        &kp N3        &kp N4
-				&kp N5        &kp N6        &kp N7        &kp N8        &kp N9
-				&kp N0        &kp MINUS     &kp EQUAL     &kp BSPC
-				&kp INS       &kp HOME      &kp PG_UP
-				/* Row 2: W-hold activates MacNav */
-				&kp TAB       &kp Q         &lt_mac_nav MACNAV W &kp E   &kp R
-				&kp T         &kp Y         &kp U         &kp I         &kp O
-				&kp P         &kp LBKT      &kp RBKT      &kp BSLH
-				&kp DEL       &kp END       &kp PG_DN
-				/* Row 3: same HRM */
-				&lt_sym SYM ESC &hml LCTRL A &hml LALT S &hml LGUI D &hml LSHFT F
-				&kp G         &kp H         &hmr RSHFT J  &hmr RGUI K   &hmr RALT L
-				&hmr RCTRL SEMI &lt_sym SYM SQT           &kp RET
-				/* Row 4: shift row */
-				&kp LSHFT                   &kp Z         &kp X         &kp C
-				&kp V         &kp B         &kp N         &kp M         &kp COMMA
-				&kp DOT       &kp FSLH                    &kp RSHFT     &kp UP
-				/* Row 5: bottom row */
-				&kp LCTRL     &kp LGUI      &kp LSHFT                   &kp SPACE
-				&kp TAB       &mo FN        &kp RCTRL
-				&kp LEFT      &kp DOWN      &kp RIGHT
+				/* Row 0: transparent */
+				&trans        &trans        &trans        &trans        &trans
+				&trans        &trans        &trans        &trans
+				&trans        &trans        &trans        &trans
+				&trans        &trans        &trans
+				/* Row 1: transparent */
+				&trans        &trans        &trans        &trans        &trans
+				&trans        &trans        &trans        &trans        &trans
+				&trans        &trans        &trans        &trans
+				&trans        &trans        &trans
+				/* Row 2: only W is overridden to use MacNav */
+				&trans        &trans        &lt_mac_nav MACNAV W &trans &trans
+				&trans        &trans        &trans        &trans        &trans
+				&trans        &trans        &trans        &trans
+				&trans        &trans        &trans
+				/* Row 3: transparent */
+				&trans        &trans        &trans        &trans        &trans
+				&trans        &trans        &trans        &trans        &trans
+				&trans        &trans                      &trans
+				/* Row 4: transparent */
+				&trans                      &trans        &trans        &trans
+				&trans        &trans        &trans        &trans        &trans
+				&trans        &trans                      &trans        &trans
+				/* Row 5: transparent */
+				&trans        &trans        &trans                      &trans
+				&trans        &trans        &trans
+				&trans        &trans        &trans
 			>;
 		};
 
