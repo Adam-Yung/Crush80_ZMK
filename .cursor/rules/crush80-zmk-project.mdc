@@ -11,16 +11,51 @@ alwaysApply: false
 
 # Crush 80 ZMK Project
 
+## CRITICAL RECOVERY — If Keyboard Is Bricked/Hung
+
+If the keyboard stops typing ~2 seconds after plug-in and `mcumgr` commands stall:
+
+```bash
+python3 scripts/force_recovery.py   # Erases slot 0 header (one command, needs to land in <2s window)
+# Unplug, wait 2s, replug → MCUboot enters serial recovery (no app runs)
+~/go/bin/mcumgr --conntype serial --connstring "dev=/dev/cu.usbmodem1101,baud=115200" \
+  image upload dist/crush80-zmk-app.signed.MACMODE-WORKING.bin
+# Unplug, wait 2s, replug → keyboard boots working firmware
+```
+
+**Root cause**: `irq_lock()` + unbounded `while (REG_HSPI_STATUS & HSPI_BUSY) {}` busy-wait.
+Hardware never responds → system hangs permanently with all interrupts masked.
+
+## SAFETY RULES FOR DRIVER DEVELOPMENT
+
+1. **NEVER** use unbounded busy-waits (`while(reg) {}`) inside `irq_lock()`.
+   Always add a timeout: `for (int i = 0; i < 100000 && (REG & BIT); i++) {}`
+   If timeout expires, log error and bail — don't hang the system.
+
+2. **NEVER** flash firmware that uses `irq_lock` for >1ms without first verifying
+   in a test build that the locked section actually completes.
+
+3. **ALWAYS** keep `dist/crush80-zmk-app.signed.MACMODE-WORKING.bin` as a known-good backup.
+
+4. **Before flashing experimental firmware**, ALWAYS verify `mcumgr image list` responds.
+
+5. If the keyboard hangs after flashing: run `python3 scripts/force_recovery.py`
+
 ## Build & Flash
 - Build: `bash build.sh --skip-bridge --skip-mcuboot`
 - Flash: `bash flash.sh` (or `bash flash.sh --build` for build+flash)
-- Recovery: `python3 scripts/recovery_flash.py` (unplug/replug race)
+- Recovery (system hung): `python3 scripts/force_recovery.py` → unplug/replug → upload good firmware
+- Recovery (SMP unresponsive): `python3 scripts/recovery_flash.py` (unplug/replug race)
 
 ## Critical Safety Rules
 1. NEVER set `CONFIG_LOG_DEFAULT_LEVEL=4` — floods serial, bricks SMP
 2. NEVER enable HSPI (`&hspi { status = "okay" }`) — PE0/PE1/PE2 are matrix columns
-3. Always confirm after flash: `mcumgr image confirm ""`
-4. If SMP times out after flash, use recovery_flash.py (unplug/replug)
+3. NEVER use unbounded busy-waits inside `irq_lock()` — if hardware doesn't respond, the ENTIRE system hangs permanently (USB, BLE, kscan all die)
+4. Always confirm after flash: `mcumgr image confirm ""`
+5. If SMP times out after flash, use recovery_flash.py (unplug/replug)
+6. If system hangs completely (~2s after boot), use `scripts/force_recovery.py` to enter MCUboot recovery
+7. ALWAYS keep a BACKUP firmware: `dist/crush80-zmk-app.signed.MACMODE-WORKING.bin`
+8. Before flashing experimental firmware, ALWAYS ensure `mcumgr image list` responds
 
 ## Architecture
 - MCUboot at 0x0, ZMK app at 0x10000, slot 1 at 0x80000

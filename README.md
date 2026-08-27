@@ -53,6 +53,38 @@ bash update.sh
 
 After upload completes, **unplug the keyboard USB cable, wait 2 seconds, plug back in**. MCUboot swaps to the new firmware on cold boot.
 
+## Emergency Recovery (Bricked Keyboard)
+
+> **Symptom**: Keyboard stops typing ~2 seconds after plug-in. `mcumgr image upload` stalls or fails. USB device may enumerate but SMP commands timeout.
+
+> **Cause**: Firmware bug where `irq_lock()` + unbounded busy-wait (`while (REG & BIT) {}`) creates a permanent system hang. All interrupts are masked, so USB, BLE, and kscan all die simultaneously.
+
+### Fix: Force MCUboot Serial Recovery
+
+```bash
+# Step 1: With keyboard plugged in (even if hung), run:
+python3 scripts/force_recovery.py
+
+# Step 2: UNPLUG the keyboard, wait 2 seconds, REPLUG
+# MCUboot enters serial recovery mode (no app runs — no hang!)
+
+# Step 3: Upload known-good firmware:
+~/go/bin/mcumgr --conntype serial --connstring "dev=/dev/cu.usbmodem1101,baud=115200" \
+  image upload dist/crush80-zmk-app.signed.MACMODE-WORKING.bin
+
+# Step 4: Unplug, wait 2 seconds, replug — keyboard boots normally
+```
+
+### How It Works
+
+The firmware includes a custom `flash_mgmt` MCUmgr group (ID 64) that can erase flash sectors. `force_recovery.py` erases the slot 0 image header (address 0x10000, 4096 bytes). MCUboot is configured with `CONFIG_BOOT_SERIAL_NO_APPLICATION=y`, so when it sees no valid app header, it enters permanent serial recovery mode over USB. From there, firmware can be uploaded with no time pressure because no application code is running.
+
+### Why Normal Recovery Doesn't Work
+
+The normal `mcumgr image upload` requires the running app's SMP handler to process each upload chunk. When the system hangs 2 seconds after boot, only a few chunks transfer before the irq_lock deadlock kills everything. The `force_recovery.py` script only needs to send ONE small erase command within that 2-second window — which reliably succeeds.
+
+---
+
 ## Keymap Configuration
 
 ### Available keymaps
@@ -97,6 +129,7 @@ bash update.sh
 | `flash.sh` | Flash with DTR wake + test/confirm flow |
 | `install_zmk.sh` | First-time install from stock manufacturer firmware |
 | `restore_stock.sh` | Revert to original manufacturer firmware |
+| `scripts/force_recovery.py` | **EMERGENCY**: Force MCUboot recovery when system is hung |
 | `scripts/recovery_flash.py` | Recovery flash when SMP is unresponsive |
 
 ## Recovery
@@ -104,8 +137,9 @@ bash update.sh
 If the keyboard stops responding after a bad flash:
 
 1. **Unplug and replug** — MCUboot auto-reverts if the new firmware doesn't confirm within 11 seconds
-2. **Recovery flash** — `python3 scripts/recovery_flash.py` (unplug, run script, replug when prompted)
-3. **Restore stock** — `bash restore_stock.sh`
+2. **Force MCUboot recovery** — `python3 scripts/force_recovery.py` (erases slot 0 header, forces MCUboot serial recovery on next boot). **Use this when the system hangs and normal upload can't complete.**
+3. **Recovery flash** — `python3 scripts/recovery_flash.py` (unplug, run script, replug when prompted)
+4. **Restore stock** — `bash restore_stock.sh`
 
 ## Project Structure
 
