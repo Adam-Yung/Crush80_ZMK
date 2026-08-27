@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+d   #!/usr/bin/env python3
 """
 Emergency upload for Crush80 — gets firmware through before system hangs.
 Previously achieved 96% in one burst. Just keep retrying until 100%.

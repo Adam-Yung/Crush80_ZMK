@@ -69,7 +69,8 @@ python3 scripts/force_recovery.py
 # MCUboot enters serial recovery mode (no app runs — no hang!)
 
 # Step 3: Upload known-good firmware:
-~/go/bin/mcumgr --conntype serial --connstring "dev=/dev/cu.usbmodem1101,baud=115200" \
+PORT=$(python3 -c "import glob; p=glob.glob('/dev/cu.usbmodem*') or glob.glob('/dev/ttyACM*'); print(p[0] if p else '')")
+~/go/bin/mcumgr --conntype serial --connstring "dev=$PORT,baud=115200" \
   image upload dist/crush80-zmk-app.signed.MACMODE-WORKING.bin
 
 # Step 4: Unplug, wait 2 seconds, replug — keyboard boots normally

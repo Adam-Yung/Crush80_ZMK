@@ -89,14 +89,7 @@ SERIAL_PORT=""
 WAIT_SECS=15
 
 for i in $(seq 1 $WAIT_SECS); do
-    case "$(uname)" in
-        Darwin)
-            SERIAL_PORT=$(find /dev -name "cu.usbmodem*" 2>/dev/null | head -1)
-            ;;
-        Linux)
-            SERIAL_PORT=$(find /dev -name "ttyACM*" 2>/dev/null | head -1)
-            ;;
-    esac
+    SERIAL_PORT=$(python3 -c "import glob; p=glob.glob('/dev/cu.usbmodem*') or glob.glob('/dev/ttyACM*'); print(p[0] if p else '')" 2>/dev/null)
 
     if [ -n "$SERIAL_PORT" ]; then
         break

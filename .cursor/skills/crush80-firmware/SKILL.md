@@ -14,7 +14,7 @@ disable-model-invocation: true
 - Wobkey Crush 80 keyboard running custom ZMK firmware on Telink TLSR9518 (B91, RISC-V)
 - West workspace at `/Users/adyung/Projects/crush80-workspace`
 - Repo at `/Users/adyung/Adam/Crush80_ZMK`
-- Serial port: `/dev/cu.usbmodem1101` (USB CDC-ACM)
+- Serial port: auto-detected via `python3 -c "import glob; p=glob.glob('/dev/cu.usbmodem*') or glob.glob('/dev/ttyACM*'); print(p[0] if p else '')"` (USB CDC-ACM)
 - Keymap config source of truth: `~/.config/DOTFILES/keybindings/crush80-zmk/`
 - `build.sh` syncs from dotfiles before building — always edit config THERE
 
@@ -56,22 +56,25 @@ Output: `dist/crush80-zmk-app.signed.bin`
 The B91 MCUboot requires a COLD BOOT (physical power cycle) to perform image swap. Software reset is NOT sufficient.
 
 ```bash
+# Auto-detect port
+PORT=$(python3 -c "import glob; p=glob.glob('/dev/cu.usbmodem*') or glob.glob('/dev/ttyACM*'); print(p[0] if p else '')")
+
 # 1. Upload to slot 1
-~/go/bin/mcumgr --conntype serial --connstring "dev=/dev/cu.usbmodem1101,baud=115200" \
+~/go/bin/mcumgr --conntype serial --connstring "dev=$PORT,baud=115200" \
   image upload dist/crush80-zmk-app.signed.bin
 
 # 2. Get slot 1 hash
-~/go/bin/mcumgr --conntype serial --connstring "dev=/dev/cu.usbmodem1101,baud=115200" image list
+~/go/bin/mcumgr --conntype serial --connstring "dev=$PORT,baud=115200" image list
 
 # 3. Mark pending (replace HASH with slot 1 hash from step 2)
-~/go/bin/mcumgr --conntype serial --connstring "dev=/dev/cu.usbmodem1101,baud=115200" \
+~/go/bin/mcumgr --conntype serial --connstring "dev=$PORT,baud=115200" \
   image test HASH
 
 # 4. PHYSICALLY UNPLUG the keyboard, wait 3 seconds, plug back in
 #    (This triggers MCUboot to perform the swap)
 
 # 5. Wait 15 seconds for MCUboot swap + app boot, then confirm:
-~/go/bin/mcumgr --conntype serial --connstring "dev=/dev/cu.usbmodem1101,baud=115200" \
+~/go/bin/mcumgr --conntype serial --connstring "dev=$PORT,baud=115200" \
   image confirm ""
 ```
 
@@ -83,7 +86,8 @@ The Go `smp_flash` tool writes MCUboot+app directly to staging area then commits
 
 ```bash
 cd scripts/smp_flash
-./smp_flash -port /dev/cu.usbmodem1101 -dist ../../dist -commit=true
+PORT=$(python3 -c "import glob; p=glob.glob('/dev/cu.usbmodem*') or glob.glob('/dev/ttyACM*'); print(p[0] if p else '')")
+./smp_flash -port "$PORT" -dist ../../dist -commit=true
 ```
 
 Note: This tool sometimes has verify errors. If it fails, try again or use the mcumgr approach above.
@@ -146,7 +150,8 @@ python3 scripts/force_recovery.py
 #    The keyboard will NOT type — this is expected!
 
 # 4. Upload known-good firmware (no time pressure now):
-~/go/bin/mcumgr --conntype serial --connstring "dev=/dev/cu.usbmodem1101,baud=115200" \
+PORT=$(python3 -c "import glob; p=glob.glob('/dev/cu.usbmodem*') or glob.glob('/dev/ttyACM*'); print(p[0] if p else '')")
+~/go/bin/mcumgr --conntype serial --connstring "dev=$PORT,baud=115200" \
   image upload dist/crush80-zmk-app.signed.MACMODE-WORKING.bin
 
 # 5. Unplug, wait 2 seconds, replug — keyboard boots the working firmware

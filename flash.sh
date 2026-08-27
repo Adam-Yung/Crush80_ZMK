@@ -10,7 +10,7 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 DIST="$REPO_DIR/dist"
-PORT="${CRUSH80_PORT:-$(python3 -c "import glob; p=glob.glob('/dev/cu.usbmodem*'); print(p[0] if p else '')" 2>/dev/null)}"
+PORT="${CRUSH80_PORT:-$(python3 -c "import glob; p=glob.glob('/dev/cu.usbmodem*') or glob.glob('/dev/ttyACM*'); print(p[0] if p else '')" 2>/dev/null)}"
 MCUMGR="${CRUSH80_MCUMGR:-$HOME/go/bin/mcumgr}"
 CONN="dev=$PORT,baud=115200"
 
@@ -23,7 +23,7 @@ fi
 
 # Auto-detect serial port if default doesn't exist
 if [ ! -e "$PORT" ]; then
-    DETECTED=$(python3 -c "import glob; p=glob.glob('/dev/cu.usbmodem*'); print(p[0] if p else '')" 2>/dev/null || true)
+    DETECTED=$(python3 -c "import glob; p=glob.glob('/dev/cu.usbmodem*') or glob.glob('/dev/ttyACM*'); print(p[0] if p else '')" 2>/dev/null || true)
     if [ -n "$DETECTED" ]; then
         PORT="$DETECTED"
         CONN="dev=$PORT,baud=115200"
@@ -63,6 +63,7 @@ if [ ! -f "$IMAGE" ]; then
 fi
 
 echo "Uploading $(basename "$IMAGE")..."
+python3 -c "import serial,time; s=serial.Serial('$PORT',115200,timeout=0.5); s.dtr=True; time.sleep(0.3); s.close()" 2>/dev/null || true
 $MCUMGR --conntype serial --connstring "$CONN" image upload "$IMAGE"
 
 echo ""
