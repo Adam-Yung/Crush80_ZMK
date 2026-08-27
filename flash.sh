@@ -10,7 +10,7 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 DIST="$REPO_DIR/dist"
-PORT="${CRUSH80_PORT:-/dev/cu.usbmodem1101}"
+PORT="${CRUSH80_PORT:-$(python3 -c "import glob; p=glob.glob('/dev/cu.usbmodem*'); print(p[0] if p else '')" 2>/dev/null)}"
 MCUMGR="${CRUSH80_MCUMGR:-$HOME/go/bin/mcumgr}"
 CONN="dev=$PORT,baud=115200"
 
