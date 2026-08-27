@@ -18,7 +18,8 @@ If the keyboard stops typing ~2 seconds after plug-in and `mcumgr` commands stal
 ```bash
 python3 scripts/force_recovery.py   # Erases slot 0 header (one command, needs to land in <2s window)
 # Unplug, wait 2s, replug → MCUboot enters serial recovery (no app runs)
-~/go/bin/mcumgr --conntype serial --connstring "dev=/dev/cu.usbmodem1101,baud=115200" \
+PORT=$(python3 -c "import glob; p=glob.glob('/dev/cu.usbmodem*') or glob.glob('/dev/ttyACM*'); print(p[0] if p else '')")
+~/go/bin/mcumgr --conntype serial --connstring "dev=$PORT,baud=115200" \
   image upload dist/crush80-zmk-app.signed.MACMODE-WORKING.bin
 # Unplug, wait 2s, replug → keyboard boots working firmware
 ```
@@ -60,7 +61,7 @@ Hardware never responds → system hangs permanently with all interrupts masked.
 ## Architecture
 - MCUboot at 0x0, ZMK app at 0x10000, slot 1 at 0x80000
 - Flash via MCUboot swap: upload → test hash → reset → wait 12s → confirm
-- Serial port: /dev/cu.usbmodem1101 at 115200 baud
+- Serial port: auto-detected via `python3 -c "import glob; p=glob.glob('/dev/cu.usbmodem*') or glob.glob('/dev/ttyACM*'); print(p[0] if p else '')"`
 - mcumgr CLI: ~/go/bin/mcumgr
 
 ## GPIO Pin Assignments (CONFIRMED from original firmware binary)
@@ -74,7 +75,7 @@ Hardware never responds → system hangs permanently with all interrupts masked.
 - Edit keymap there, then just run `bash flash.sh --build`
 
 ## Debugging
-- Test SMP: `~/go/bin/mcumgr --conntype serial --connstring "dev=/dev/cu.usbmodem1101,baud=115200" echo hello`
+- Test SMP: `PORT=$(python3 -c "import glob; p=glob.glob('/dev/cu.usbmodem*') or glob.glob('/dev/ttyACM*'); print(p[0] if p else '')"); ~/go/bin/mcumgr --conntype serial --connstring "dev=$PORT,baud=115200" echo hello`
 - Check image: `mcumgr image list`
 - Reset: `mcumgr reset`
 - For kscan debugging, use CONFIG_ZMK_LOG_LEVEL_DBG=y (NOT LOG_DEFAULT_LEVEL=4)
