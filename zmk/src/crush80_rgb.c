@@ -35,6 +35,24 @@ LOG_MODULE_REGISTER(crush80_rgb, LOG_LEVEL_INF);
 #define REG_GPIO_PC_OUT   (*(volatile uint8_t *)0x80140311)
 #define REG_GPIO_PC_OEN   (*(volatile uint8_t *)0x80140312)
 #define REG_GPIO_PC_IE    (*(volatile uint8_t *)0x80140313)
+#define REG_GPIO_PC_FUNC  (*(volatile uint8_t *)0x80140316)  /* GPIO function: 1=GPIO, 0=alt */
+
+/* ── B91 Analog register interface (indirect access) ─────────────────── */
+
+#define REG_ANA_ADDR      (*(volatile uint8_t *)0x80140180)
+#define REG_ANA_CTRL      (*(volatile uint8_t *)0x80140182)
+#define REG_ANA_BUFCNT    (*(volatile uint8_t *)0x80140183)
+#define REG_ANA_DATA      (*(volatile uint8_t *)0x80140184)
+
+#define ANA_CTRL_CYC      0x40
+#define ANA_CTRL_RW       0x20  /* set for write */
+#define ANA_CTRL_BUSY     0x01
+#define ANA_BUFCNT_TX     0x08
+
+/* Analog register addresses for GPIO (from SDK gpio_reg.h) */
+#define AREG_GPIO_PC_IE   0xBD  /* PC analog input enable */
+#define AREG_GPIO_PC_DS   0xBF  /* PC analog drive strength */
+#define AREG_GPIO_PC_PULL 0x12  /* PC pull-up/down (bits [5:4] = PC2) */
 
 /* Pin bitmasks */
 #define PE0_BIT  0x01  /* CS chip 0 */
@@ -109,6 +127,33 @@ static bool rgb_initialized;
 
 static K_THREAD_STACK_DEFINE(rgb_stack, RGB_STACK_SIZE);
 static struct k_thread rgb_thread_data;
+
+/* ── Analog register access (indirect via analog controller) ─────────── */
+
+static void ana_wait(void) {
+    while (REG_ANA_CTRL & ANA_CTRL_BUSY) {}
+}
+
+static uint8_t ana_read(uint8_t addr) {
+    unsigned int key = irq_lock();
+    REG_ANA_ADDR = addr;
+    REG_ANA_CTRL = ANA_CTRL_CYC;
+    ana_wait();
+    uint8_t val = REG_ANA_DATA;
+    irq_unlock(key);
+    return val;
+}
+
+static void ana_write(uint8_t addr, uint8_t data) {
+    unsigned int key = irq_lock();
+    REG_ANA_ADDR = addr;
+    REG_ANA_DATA = data;
+    while (!(REG_ANA_BUFCNT & ANA_BUFCNT_TX)) {}
+    REG_ANA_CTRL = ANA_CTRL_CYC | ANA_CTRL_RW;
+    ana_wait();
+    REG_ANA_CTRL = 0x00;
+    irq_unlock(key);
+}
 
 /* ── PE function mux register ────────────────────────────────────────── */
 
@@ -308,11 +353,28 @@ static void aw_chip_init(uint8_t chip) {
 /* ── LED power control ───────────────────────────────────────────────── */
 
 static void led_power_on(void) {
-    REG_GPIO_PC_IE &= ~PC2_BIT;
-    REG_GPIO_PC_OEN &= ~PC2_BIT;
-    REG_GPIO_PC_OUT |= PC2_BIT;
+    /*
+     * PC2 = LED power MOSFET gate (active HIGH).
+     * Full initialization sequence mirrored from Rainy75 led_strip_b91_spi.c:
+     * 1. Set PC2 to GPIO mode
+     * 2. Clear OEN (enable output driver)
+     * 3. Disable analog input enable (CRITICAL — without this, analog
+     *    circuitry may sink the output and prevent driving the MOSFET)
+     * 4. Drive HIGH (power on)
+     * 5. Configure pull-up (10K) for stable drive
+     */
+    REG_GPIO_PC_FUNC |= PC2_BIT;                         /* 1. GPIO mode */
+    REG_GPIO_PC_OEN &= ~PC2_BIT;                         /* 2. Output enable */
+    ana_write(AREG_GPIO_PC_IE, ana_read(AREG_GPIO_PC_IE) & ~PC2_BIT);  /* 3. Disable analog IE */
+    REG_GPIO_PC_OUT |= PC2_BIT;                          /* 4. Drive HIGH */
+    uint8_t pull = ana_read(AREG_GPIO_PC_PULL);
+    ana_write(AREG_GPIO_PC_PULL, (pull & ~(0x03 << 4)) | (0x01 << 4)); /* 5. PC2 pull-up 10K */
+
     k_msleep(50);
-    LOG_INF("PC2 power ON (HIGH) (OUT=0x%02x OEN=0x%02x)", REG_GPIO_PC_OUT, REG_GPIO_PC_OEN);
+
+    LOG_INF("PC2 power: OUT=0x%02x OEN=0x%02x FUNC=0x%02x ANA_IE=0x%02x ANA_PULL=0x%02x",
+            REG_GPIO_PC_OUT, REG_GPIO_PC_OEN, REG_GPIO_PC_FUNC,
+            ana_read(AREG_GPIO_PC_IE), ana_read(AREG_GPIO_PC_PULL));
 }
 
 static void led_power_off(void) {
@@ -326,16 +388,13 @@ static void rgb_update_frame(void) {
         return;
     }
 
-    unsigned int key = irq_lock();
-
-    /* GPIO bit-bang: aw_write handles pin mode internally */
+    /* No irq_lock for now — allows USB/BLE to stay responsive.
+     * Kscan may glitch during transfer but won't permanently break. */
     aw_write(0, AW_PAGE_PWM, 0x00, chip0_pwm, AW_PWM_CHANNELS);
     aw_write(1, AW_PAGE_PWM, 0x00, chip1_pwm, AW_PWM_CHANNELS);
 
     /* Restore pins for kscan */
     REG_GPIO_PE_OUT |= (PE1_BIT | PE2_BIT);
-
-    irq_unlock(key);
 }
 
 /* ── Public API ──────────────────────────────────────────────────────── */
@@ -390,14 +449,12 @@ static void rgb_thread_fn(void *p1, void *p2, void *p3) {
     ARG_UNUSED(p2);
     ARG_UNUSED(p3);
 
-    k_msleep(2000);
+    k_msleep(6000);  /* Wait for MCUboot confirm (runs at 5s) before LED init */
 
     LOG_INF("crush80_rgb: powering on LED rail");
     led_power_on();
 
     LOG_INF("crush80_rgb: configuring GPIO bit-bang SPI + initializing AW20216S");
-
-    unsigned int key = irq_lock();
 
     /* GPIO bit-bang mode: keep PE1/PE2 in GPIO mode, ensure output enabled */
     REG_GPIO_PE_FUNC |= (PE1_BIT | PE2_BIT);  /* GPIO mode */
@@ -411,10 +468,6 @@ static void rgb_thread_fn(void *p1, void *p2, void *p3) {
     aw_chip_init(0);
     LOG_INF("After chip0 init (bitbang): done");
     aw_chip_init(1);
-
-    irq_unlock(key);
-
-    irq_unlock(key);
 
     rgb_initialized = true;
     LOG_INF("crush80_rgb: init complete, PE_FUNC=0x%02x", REG_GPIO_PE_FUNC);

@@ -16,7 +16,15 @@ import sys
 import re
 import time
 
-PORT = sys.argv[1] if len(sys.argv) > 1 else "/dev/cu.usbmodem1101"
+PORT = sys.argv[1] if len(sys.argv) > 1 else None
+if not PORT:
+    import glob as _glob
+    _ports = _glob.glob('/dev/cu.usbmodem*')
+    PORT = _ports[0] if _ports else None
+    if not PORT:
+        print("ERROR: No keyboard found. Plug in and retry, or pass port as argument.")
+        sys.exit(1)
+    print(f"Auto-detected port: {PORT}")
 DURATION = int(sys.argv[2]) if len(sys.argv) > 2 else 0
 BAUD = 115200
 LOG_FILE = "capture_matrix_log.txt"
