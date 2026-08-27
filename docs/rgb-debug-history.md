@@ -1,5 +1,43 @@
 # RGB LED Debug History — Crush80 ZMK
 
+## Recovery Procedure (PROVEN — 2026-08-27)
+
+The RGB LED driver used `irq_lock()` with a busy-wait (`while (REG_HSPI_STATUS & HSPI_BUSY) {}`) that never completed. This caused the ENTIRE system to hang ~2 seconds after boot — USB died, BLE died, keyboard stopped typing. Normal `mcumgr image upload` couldn't complete because the system froze mid-transfer.
+
+### How force_recovery.py Saved the Keyboard
+
+1. Plugged in the bricked keyboard (system hangs after ~2s but USB enumerates briefly)
+2. Ran `python3 scripts/force_recovery.py` within the 2-second window
+3. Script sent ONE flash_mgmt erase command (group 64, cmd 0) to erase slot 0 header at 0x10000
+4. Unplugged, waited 2 seconds, replugged
+5. MCUboot found no valid app → entered serial recovery mode (CONFIG_BOOT_SERIAL_NO_APPLICATION=y)
+6. Uploaded working firmware: `mcumgr image upload dist/crush80-zmk-app.signed.MACMODE-WORKING.bin`
+7. Unplugged, replugged → keyboard booted normally with working firmware
+
+### Why Normal Recovery Failed
+
+- `mcumgr image upload` needs hundreds of SMP round-trips to upload a full image
+- System hangs after ~2 seconds, killing SMP mid-transfer
+- `force_recovery.py` only needs ONE command to land in that 2-second window
+- After erasing the header, MCUboot recovery mode runs with NO application → no hang
+
+---
+
+## SAFETY RULES FOR DRIVER DEVELOPMENT
+
+1. **NEVER** use unbounded busy-waits (`while(reg) {}`) inside `irq_lock()`.
+   Always add a timeout: `for (int i = 0; i < 100000 && (REG & BIT); i++) {}`
+   If timeout expires, log error and bail — don't hang the system.
+
+2. **NEVER** flash firmware that uses `irq_lock` for >1ms without first verifying
+   in a test build that the locked section actually completes.
+
+3. **ALWAYS** keep `dist/crush80-zmk-app.signed.MACMODE-WORKING.bin` as a known-good backup.
+
+4. If the keyboard hangs after flashing: run `python3 scripts/force_recovery.py`
+
+---
+
 ## Status: BLOCKED — LEDs do not light up despite confirmed SPI hardware activity
 
 This document captures all attempts to bring up the AW20216S RGB LED controller on the Wobkey Crush 80 keyboard running ZMK firmware on a Telink TLSR9518 (B91 RISC-V) MCU.

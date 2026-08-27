@@ -123,6 +123,67 @@ Extracted from original Crush 80 firmware binary (github.com/Desz01ate/Wobkey_Cr
 - LED channel mapping table at firmware offset 0x1C8F4 (91 entries)
 - Stock firmware does the same pin-sharing via time-multiplexing
 
+## Recovery from Bricked Firmware (System Hang)
+
+When firmware causes a complete system hang (e.g., `irq_lock()` + busy-wait deadlock), the keyboard stops typing ~2 seconds after plug-in and normal `mcumgr image upload` cannot complete because the system freezes mid-transfer.
+
+### Diagnosis
+
+- Keyboard enumerates on USB but stops responding ~2 seconds after plug-in
+- `mcumgr echo hello` may work once, then timeout on retry
+- `mcumgr image upload` starts but stalls after a few chunks
+- Root cause: firmware bug locks interrupts with no timeout (all USB/BLE/kscan dies)
+
+### Recovery Procedure (PROVEN — Saved the keyboard 2026-08-27)
+
+```bash
+# 1. Plug in keyboard (even though it's hung)
+# 2. Immediately run (must land within the ~2s window before hang):
+python3 scripts/force_recovery.py
+
+# 3. Unplug keyboard, wait 2 seconds, replug
+#    MCUboot sees no valid app header → enters serial recovery mode
+#    The keyboard will NOT type — this is expected!
+
+# 4. Upload known-good firmware (no time pressure now):
+~/go/bin/mcumgr --conntype serial --connstring "dev=/dev/cu.usbmodem1101,baud=115200" \
+  image upload dist/crush80-zmk-app.signed.MACMODE-WORKING.bin
+
+# 5. Unplug, wait 2 seconds, replug — keyboard boots the working firmware
+```
+
+### How force_recovery.py Works
+
+1. Sends a single SMP command to the custom `flash_mgmt` group (MCUmgr group ID 64, cmd 0)
+2. This erases ONE flash sector (4096 bytes) at address 0x10000 (slot 0 image header)
+3. MCUboot is configured with `CONFIG_BOOT_SERIAL_NO_APPLICATION=y`
+4. When MCUboot sees no valid image header → enters permanent serial recovery over USB
+5. In recovery mode, no application code runs — no hang — firmware uploads normally
+
+### Why This Works When Normal Recovery Doesn't
+
+- Normal `mcumgr image upload` requires the app's SMP handler to process each chunk (~500 chunks for a full image)
+- With a 2-second window before hang, only ~10 chunks can transfer — upload always fails
+- `force_recovery.py` only sends ONE small erase command — reliably fits in the 2s window
+- After recovery mode is entered, upload has unlimited time (no app to hang)
+
+### Prevention
+
+See SAFETY RULES FOR DRIVER DEVELOPMENT below.
+
+## SAFETY RULES FOR DRIVER DEVELOPMENT
+
+1. **NEVER** use unbounded busy-waits (`while(reg) {}`) inside `irq_lock()`.
+   Always add a timeout: `for (int i = 0; i < 100000 && (REG & BIT); i++) {}`
+   If timeout expires, log error and bail — don't hang the system.
+
+2. **NEVER** flash firmware that uses `irq_lock` for >1ms without first verifying
+   in a test build that the locked section actually completes.
+
+3. **ALWAYS** keep `dist/crush80-zmk-app.signed.MACMODE-WORKING.bin` as a known-good backup.
+
+4. If the keyboard hangs after flashing: run `python3 scripts/force_recovery.py`
+
 ## Known Issues
 
 1. MCUboot swap requires cold boot (unplug/replug), not software reset
