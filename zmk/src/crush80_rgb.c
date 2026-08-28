@@ -1,20 +1,18 @@
 /*
- * Crush80 RGB LED Driver — AW20216S via HSPI Hardware
+ * Crush80 RGB DIAGNOSTIC — Cycles through all SPI modes with different colors.
+ * If any LED lights up, the color tells us which mode is correct.
  *
- * Uses the B91's HSPI hardware peripheral to communicate with the AW20216S.
- * PE1 (CLK) and PE2 (MOSI) are temporarily switched from GPIO mode (kscan)
- * to HSPI alternate function mode during each SPI transfer, then restored.
+ * Color → Mode mapping:
+ *   RED    = SPI Mode 0 (CPOL=0, CPHA=0), normal pins
+ *   GREEN  = SPI Mode 1 (CPOL=0, CPHA=1), normal pins
+ *   BLUE   = SPI Mode 2 (CPOL=1, CPHA=0), normal pins
+ *   WHITE  = SPI Mode 3 (CPOL=1, CPHA=1), normal pins
+ *   PURPLE = Mode 0, pins swapped (PE1=MOSI, PE2=CLK)
+ *   YELLOW = Mode 0, PC2 inverted (drive LOW instead of HIGH)
+ *   CYAN   = Mode 3, PC2 inverted
  *
- * Pin assignments:
- *   PE0 = CS chip 0 (GPIO manual, active low) — shared with kscan col 0
- *   PE1 = HSPI CLK (FUNC_C alt) — shared with kscan col 1
- *   PE2 = HSPI MOSI (FUNC_C alt) — shared with kscan col 2
- *   PC0 = CS chip 1 (GPIO manual, active low) — shared with kscan col 13
- *   PC2 = LED power MOSFET (GPIO, active high) — dedicated
- *
- * Safety: all pin switching happens under irq_lock (kscan cannot scan).
- * The thread starts 2s after boot (USB/BLE already up).
- * If anything goes wrong, MCUmgr is still accessible for recovery.
+ * Each mode runs for 5 seconds, then cycles to next.
+ * Uses GPIO bit-bang (proven to physically drive the pins via kscan evidence).
  */
 
 #include <zephyr/kernel.h>
@@ -25,283 +23,105 @@
 
 LOG_MODULE_REGISTER(crush80_rgb, LOG_LEVEL_INF);
 
-/* ── B91 GPIO registers ──────────────────────────────────────────────── */
-
+/* GPIO registers */
 #define REG_GPIO_PE_OUT   (*(volatile uint8_t *)0x80140321)
-#define REG_GPIO_PE_OEN   (*(volatile uint8_t *)0x80140322)
-#define REG_GPIO_PE_IE    (*(volatile uint8_t *)0x80140323)
-#define REG_GPIO_PE_FUNC  (*(volatile uint8_t *)0x80140326)  /* GPIO function: 1=GPIO, 0=alt */
-
 #define REG_GPIO_PC_OUT   (*(volatile uint8_t *)0x80140311)
 #define REG_GPIO_PC_OEN   (*(volatile uint8_t *)0x80140312)
 #define REG_GPIO_PC_IE    (*(volatile uint8_t *)0x80140313)
-#define REG_GPIO_PC_FUNC  (*(volatile uint8_t *)0x80140316)  /* GPIO function: 1=GPIO, 0=alt */
 
-/* ── B91 Analog register interface (indirect access) ─────────────────── */
-
-#define REG_ANA_ADDR      (*(volatile uint8_t *)0x80140180)
-#define REG_ANA_CTRL      (*(volatile uint8_t *)0x80140182)
-#define REG_ANA_BUFCNT    (*(volatile uint8_t *)0x80140183)
-#define REG_ANA_DATA      (*(volatile uint8_t *)0x80140184)
-
-#define ANA_CTRL_CYC      0x40
-#define ANA_CTRL_RW       0x20  /* set for write */
-#define ANA_CTRL_BUSY     0x01
-#define ANA_BUFCNT_TX     0x08
-
-/* Analog register addresses for GPIO (from SDK gpio_reg.h) */
-#define AREG_GPIO_PC_IE   0xBD  /* PC analog input enable */
-#define AREG_GPIO_PC_DS   0xBF  /* PC analog drive strength */
-#define AREG_GPIO_PC_PULL 0x12  /* PC pull-up/down (bits [5:4] = PC2) */
-
-/* Pin bitmasks */
 #define PE0_BIT  0x01  /* CS chip 0 */
-#define PE1_BIT  0x02  /* HSPI CLK */
-#define PE2_BIT  0x04  /* HSPI MOSI */
+#define PE1_BIT  0x02  /* CLK (or MOSI if swapped) */
+#define PE2_BIT  0x04  /* MOSI (or CLK if swapped) */
 #define PC0_BIT  0x01  /* CS chip 1 */
 #define PC2_BIT  0x04  /* LED power MOSFET */
 
-/* ── HSPI hardware registers (base 0x81FFFFC0) ───────────────────────── */
-
-#define HSPI_BASE          0x81FFFFC0
-
-#define REG_HSPI_MODE0     (*(volatile uint8_t *)(HSPI_BASE + 0x00))
-#define REG_HSPI_MODE1     (*(volatile uint8_t *)(HSPI_BASE + 0x01))  /* clock divider */
-#define REG_HSPI_MODE2     (*(volatile uint8_t *)(HSPI_BASE + 0x02))
-#define REG_HSPI_TX_CNT0   (*(volatile uint8_t *)(HSPI_BASE + 0x03))
-#define REG_HSPI_TX_CNT1   (*(volatile uint8_t *)(HSPI_BASE + 0x20))  /* different offset for HSPI! */
-#define REG_HSPI_TX_CNT2   (*(volatile uint8_t *)(HSPI_BASE + 0x21))
-#define REG_HSPI_TRANS0    (*(volatile uint8_t *)(HSPI_BASE + 0x05))
-#define REG_HSPI_TRANS1    (*(volatile uint8_t *)(HSPI_BASE + 0x06))  /* cmd reg = TRIGGER */
-#define REG_HSPI_TRANS2    (*(volatile uint8_t *)(HSPI_BASE + 0x07))
-#define REG_HSPI_DATA(n)   (*(volatile uint8_t *)(HSPI_BASE + 0x08 + (n)))
-#define REG_HSPI_FIFO_NUM  (*(volatile uint8_t *)(HSPI_BASE + 0x0C))
-#define REG_HSPI_FIFO_ST   (*(volatile uint8_t *)(HSPI_BASE + 0x0D))
-#define REG_HSPI_IRQ_ST    (*(volatile uint8_t *)(HSPI_BASE + 0x0E))
-#define REG_HSPI_STATUS    (*(volatile uint8_t *)(HSPI_BASE + 0x0F))
-#define REG_HSPI_XIP_CTRL  (*(volatile uint8_t *)(HSPI_BASE + 0x14))
-
-/* HSPI clock enable */
-#define REG_CLK_EN0        (*(volatile uint8_t *)0x801401E4)
-#define CLK0_HSPI_EN       BIT(0)
-
-/* HSPI MODE0 bits */
-#define HSPI_MASTER_MODE   BIT(7)
-
-/* HSPI FIFO_ST bits */
-#define HSPI_TXF_FULL      BIT(6)
-
-/* HSPI STATUS bits */
-#define HSPI_BUSY          BIT(7)
-
-/* ── AW20216S protocol ───────────────────────────────────────────────── */
-
-/*
- * Command byte: [1010][page(3 bits)][W/R]
- * Page 0 = config, Page 1 = PWM, Page 2 = scaling
- */
+/* AW20216S */
 #define AW_CMD_WRITE(page)  (0xA0 | (((page) & 0x07) << 1))
-
 #define AW_PAGE_CONFIG  0
 #define AW_PAGE_PWM     1
 #define AW_PAGE_SCALE   2
-
-#define AW_REG_GCR      0x00  /* Global config: bit0=CHIPEN */
-#define AW_REG_GCCR     0x01  /* Global current 0x00-0xFF */
-#define AW_REG_RSTN     0x2F  /* Software reset: write 0xAE */
+#define AW_REG_GCR      0x00
+#define AW_REG_GCCR     0x01
+#define AW_REG_RSTN     0x2F
 #define AW_RESET_VAL    0xAE
-
 #define AW_PWM_CHANNELS 216
 
-/* ── Frame buffer ────────────────────────────────────────────────────── */
-
-static uint8_t chip0_pwm[AW_PWM_CHANNELS];
-static uint8_t chip1_pwm[AW_PWM_CHANNELS];
-static bool rgb_enabled = true;
-static bool rgb_initialized;
-
 /* Thread */
-#define RGB_STACK_SIZE     1536
+#define RGB_STACK_SIZE     2048
 #define RGB_THREAD_PRIORITY 10
-#define RGB_REFRESH_MS     33
 
 static K_THREAD_STACK_DEFINE(rgb_stack, RGB_STACK_SIZE);
 static struct k_thread rgb_thread_data;
 
-/* ── Analog register access (indirect via analog controller) ─────────── */
+/* Current mode config */
+static uint8_t clk_bit = PE1_BIT;
+static uint8_t mosi_bit = PE2_BIT;
+static bool cpol = false;  /* false=idle LOW, true=idle HIGH */
+static bool cpha = false;  /* false=sample on first edge, true=sample on second edge */
 
-static void ana_wait(void) {
-    while (REG_ANA_CTRL & ANA_CTRL_BUSY) {}
-}
+/* ── Bit-bang SPI (mode-aware) ───────────────────────────────────── */
 
-static uint8_t ana_read(uint8_t addr) {
-    unsigned int key = irq_lock();
-    REG_ANA_ADDR = addr;
-    REG_ANA_CTRL = ANA_CTRL_CYC;
-    ana_wait();
-    uint8_t val = REG_ANA_DATA;
-    irq_unlock(key);
-    return val;
-}
-
-static void ana_write(uint8_t addr, uint8_t data) {
-    unsigned int key = irq_lock();
-    REG_ANA_ADDR = addr;
-    REG_ANA_DATA = data;
-    while (!(REG_ANA_BUFCNT & ANA_BUFCNT_TX)) {}
-    REG_ANA_CTRL = ANA_CTRL_CYC | ANA_CTRL_RW;
-    ana_wait();
-    REG_ANA_CTRL = 0x00;
-    irq_unlock(key);
-}
-
-/* ── PE function mux register ────────────────────────────────────────── */
-
-/*
- * reg_gpio_pe_fuc_l at 0x80140350 contains 2-bit function select per pin:
- *   PE0=[1:0], PE1=[3:2], PE2=[5:4], PE3=[7:6]
- * Values: 0=FUNC_A, 1=FUNC_B, 2=FUNC_C (HSPI), 3=FUNC_D
- *
- * Just clearing the GPIO function bit (0x80140326) enters alt-mode,
- * but WITHOUT the correct mux value the pin routes to FUNC_A (I2C), not HSPI.
- */
-#define REG_GPIO_PE_FUC_L  (*(volatile uint8_t *)0x80140350)
-
-#define PE1_FUNC_SHIFT  2
-#define PE2_FUNC_SHIFT  4
-#define PE1_FUNC_MASK   (0x03 << PE1_FUNC_SHIFT)  /* bits [3:2] */
-#define PE2_FUNC_MASK   (0x03 << PE2_FUNC_SHIFT)  /* bits [5:4] */
-#define FUNC_C_VAL      0x02
-
-/* ── Pin management ──────────────────────────────────────────────────── */
-
-static inline void pins_to_hspi(void) {
-    /* 1. Set PE1/PE2 func_mux to FUNC_C (HSPI CLK / MOSI) */
-    REG_GPIO_PE_FUC_L = (REG_GPIO_PE_FUC_L & ~(PE1_FUNC_MASK | PE2_FUNC_MASK))
-                        | (FUNC_C_VAL << PE1_FUNC_SHIFT)
-                        | (FUNC_C_VAL << PE2_FUNC_SHIFT);
-    /* 2. Disable GPIO function → enter alt mode */
-    REG_GPIO_PE_FUNC &= ~(PE1_BIT | PE2_BIT);
-    /* 3. Enable input (required for HSPI output driver per SDK convention) */
-    REG_GPIO_PE_IE |= (PE1_BIT | PE2_BIT);
-    /* 4. Clear OEN (output enable) — stock firmware does this explicitly.
-     * On B91, OEN=0 means output driver active. Even in alt-function mode,
-     * the pin won't drive unless OEN is cleared. */
-    REG_GPIO_PE_OEN &= ~(PE1_BIT | PE2_BIT);
-}
-
-static inline void pins_to_gpio(void) {
-    /* Restore PE1/PE2 to GPIO mode for kscan */
-    REG_GPIO_PE_IE &= ~(PE1_BIT | PE2_BIT);
-    REG_GPIO_PE_FUNC |= (PE1_BIT | PE2_BIT);
-    /* Clear func_mux back to 0 (safe default for GPIO mode) */
-    REG_GPIO_PE_FUC_L &= ~(PE1_FUNC_MASK | PE2_FUNC_MASK);
-    REG_GPIO_PE_OUT |= (PE1_BIT | PE2_BIT);   /* drive HIGH (kscan idle) */
-}
-
-/* ── HSPI hardware SPI ───────────────────────────────────────────────── */
-
-static void hspi_init(void) {
-    /* Enable HSPI peripheral clock */
-    REG_CLK_EN0 |= CLK0_HSPI_EN;
-
-    /* Set pad_mul_sel bit 1 (required for PE alternate functions) */
-    (*(volatile uint8_t *)0x80140355) |= BIT(1);
-
-    /* Log pre-init state of critical registers for diagnosis */
-    uint8_t xip_before = REG_HSPI_XIP_CTRL;
-    uint8_t mode0_before = REG_HSPI_MODE0;
-    uint8_t trans0_before = REG_HSPI_TRANS0;
-
-    /* Master mode, SPI Mode 3 (CPOL=1, CPHA=1), MSB first
-     * QMK PR#17263 changed AW20216S default to Mode 3.
-     * Zephyr AW20216S driver also uses SPI_MODE_CPOL|SPI_MODE_CPHA. */
-    REG_HSPI_MODE0 = HSPI_MASTER_MODE | BIT(6) | BIT(5);  /* 0xE0 = master + mode 3 */
-
-    /* Clock divider: spi_clock = source_clock / (2 * (div + 1))
-     * AW20216S requires 1-10 MHz. With 48 MHz source:
-     * div=5 → 48M/(2*6) = 4 MHz (safe middle of 1-10 MHz range) */
-    REG_HSPI_MODE1 = 5;
-
-    /* Disable command phase, set CS high time = 0 (minimum) */
-    REG_HSPI_MODE2 = 0x00;
-
-    /* Disable HSPI address phase — without this the hardware inserts
-     * 1-4 address bytes before data, corrupting the AW20216S protocol.
-     * Also disables XIP mode and clears all other bits. */
-    REG_HSPI_XIP_CTRL = 0x00;
-
-    /* No DMA, no interrupts */
-    REG_HSPI_TRANS2 = 0x00;
-
-    /* Set WRITE_ONLY transmode + no dummy */
-    REG_HSPI_TRANS0 = (0x01 << 4);
-
-    /* Clear FIFOs */
-    REG_HSPI_FIFO_ST |= BIT(2) | BIT(3);  /* RXF_CLR | TXF_CLR */
-
-    LOG_INF("HSPI pre-init: XIP=0x%02x MODE0=0x%02x TRANS0=0x%02x",
-            xip_before, mode0_before, trans0_before);
-    LOG_INF("HSPI post-init: MODE0=0x%02x MODE2=0x%02x XIP=0x%02x TRANS0=0x%02x",
-            REG_HSPI_MODE0, REG_HSPI_MODE2, REG_HSPI_XIP_CTRL, REG_HSPI_TRANS0);
-}
-
-static void hspi_write_bytes(const uint8_t *data, uint16_t len) {
-    /* Clear TX FIFO */
-    REG_HSPI_FIFO_ST |= BIT(3);
-
-    /* Set TX byte count (24-bit, len-1 format) */
-    REG_HSPI_TX_CNT0 = (uint8_t)((len - 1) & 0xFF);
-    REG_HSPI_TX_CNT1 = (uint8_t)(((len - 1) >> 8) & 0xFF);
-    REG_HSPI_TX_CNT2 = (uint8_t)(((len - 1) >> 16) & 0xFF);
-
-    /* Set transfer mode: write-only (0x1 << 4) */
-    REG_HSPI_TRANS0 = (REG_HSPI_TRANS0 & 0x0F) | (0x01 << 4);
-
-    /* TRIGGER: write command register starts the transfer */
-    REG_HSPI_TRANS1 = 0x00;
-
-    /* Feed data to TX FIFO — hardware clocks it out as we feed */
-    for (uint16_t i = 0; i < len; i++) {
-        while (REG_HSPI_FIFO_ST & HSPI_TXF_FULL) {}
-        REG_HSPI_DATA(i & 3) = data[i];
-    }
-
-    /* Wait for transfer to complete */
-    while (REG_HSPI_STATUS & HSPI_BUSY) {}
-}
-
-/* ── GPIO bit-bang SPI (diagnostic bypass of HSPI hardware) ──────────── */
-
-/*
- * Bit-bang SPI Mode 3 (CPOL=1, CPHA=1) at ~2-4 MHz using direct GPIO writes.
- * CLK idles HIGH. Data sampled on rising edge, changed on falling edge.
- * At 48 MHz CPU, each register write takes ~1 cycle = ~21ns.
- * A full bit (2 writes) = ~42ns → ~24 MHz theoretical max.
- * With loop overhead: ~2-4 MHz actual — within AW20216S 1-10 MHz spec.
- */
-static void bitbang_byte(uint8_t byte) {
-    for (int bit = 7; bit >= 0; bit--) {
-        /* Falling edge: change data */
-        REG_GPIO_PE_OUT &= ~PE1_BIT;  /* CLK LOW */
-        if (byte & (1 << bit)) {
-            REG_GPIO_PE_OUT |= PE2_BIT;   /* MOSI HIGH */
+static inline void bb_write_byte(uint8_t data) {
+    for (int i = 7; i >= 0; i--) {
+        if (cpha) {
+            /* CPHA=1: toggle clock FIRST, then set data, then toggle back */
+            if (cpol) {
+                REG_GPIO_PE_OUT &= ~clk_bit;  /* first edge (falling for CPOL=1) */
+            } else {
+                REG_GPIO_PE_OUT |= clk_bit;   /* first edge (rising for CPOL=0) */
+            }
+            /* Set MOSI */
+            if (data & (1 << i)) {
+                REG_GPIO_PE_OUT |= mosi_bit;
+            } else {
+                REG_GPIO_PE_OUT &= ~mosi_bit;
+            }
+            __asm__ volatile("nop; nop; nop; nop;");
+            /* Second edge (data latched here) */
+            if (cpol) {
+                REG_GPIO_PE_OUT |= clk_bit;   /* back to idle HIGH */
+            } else {
+                REG_GPIO_PE_OUT &= ~clk_bit;  /* back to idle LOW */
+            }
+            __asm__ volatile("nop; nop;");
         } else {
-            REG_GPIO_PE_OUT &= ~PE2_BIT;  /* MOSI LOW */
+            /* CPHA=0: set data, then first clock edge (data latched), then back */
+            /* Set MOSI */
+            if (data & (1 << i)) {
+                REG_GPIO_PE_OUT |= mosi_bit;
+            } else {
+                REG_GPIO_PE_OUT &= ~mosi_bit;
+            }
+            __asm__ volatile("nop; nop;");
+            /* First edge (data latched here) */
+            if (cpol) {
+                REG_GPIO_PE_OUT &= ~clk_bit;  /* falling edge for CPOL=1 */
+            } else {
+                REG_GPIO_PE_OUT |= clk_bit;   /* rising edge for CPOL=0 */
+            }
+            __asm__ volatile("nop; nop; nop; nop;");
+            /* Back to idle */
+            if (cpol) {
+                REG_GPIO_PE_OUT |= clk_bit;   /* idle HIGH */
+            } else {
+                REG_GPIO_PE_OUT &= ~clk_bit;  /* idle LOW */
+            }
+            __asm__ volatile("nop; nop;");
         }
-        /* Rising edge: data sampled by slave */
-        REG_GPIO_PE_OUT |= PE1_BIT;   /* CLK HIGH */
     }
 }
 
-static void aw_write(uint8_t chip, uint8_t page, uint8_t reg,
-                     const uint8_t *data, uint16_t len) {
-    /* Ensure PE1/PE2 are in GPIO output mode (not HSPI) */
-    REG_GPIO_PE_FUNC |= (PE1_BIT | PE2_BIT);
-    REG_GPIO_PE_OEN &= ~(PE1_BIT | PE2_BIT);
-    REG_GPIO_PE_OUT |= PE1_BIT;  /* CLK idles HIGH (Mode 3) */
+static void bb_spi_write(uint8_t chip, uint8_t page, uint8_t reg,
+                         const uint8_t *data, uint16_t len) {
+    /* Set CLK to idle state */
+    if (cpol) {
+        REG_GPIO_PE_OUT |= clk_bit;
+    } else {
+        REG_GPIO_PE_OUT &= ~clk_bit;
+    }
+    REG_GPIO_PE_OUT &= ~mosi_bit;
 
-    /* Assert CS via GPIO */
+    /* Assert CS */
     if (chip == 0) {
         REG_GPIO_PE_OUT &= ~PE0_BIT;
     } else {
@@ -309,11 +129,11 @@ static void aw_write(uint8_t chip, uint8_t page, uint8_t reg,
     }
     for (volatile int d = 0; d < 20; d++) {}
 
-    /* Send: [cmd_byte][reg_addr][data...] */
-    bitbang_byte(AW_CMD_WRITE(page));
-    bitbang_byte(reg);
+    /* Send command + register + data */
+    bb_write_byte(AW_CMD_WRITE(page));
+    bb_write_byte(reg);
     for (uint16_t i = 0; i < len; i++) {
-        bitbang_byte(data[i]);
+        bb_write_byte(data[i]);
     }
 
     for (volatile int d = 0; d < 20; d++) {}
@@ -322,181 +142,146 @@ static void aw_write(uint8_t chip, uint8_t page, uint8_t reg,
     REG_GPIO_PE_OUT |= PE0_BIT;
     REG_GPIO_PC_OUT |= PC0_BIT;
 
-    for (volatile int d = 0; d < 20; d++) {}
-}
-
-static inline void aw_write_single(uint8_t chip, uint8_t page,
-                                   uint8_t reg, uint8_t val) {
-    aw_write(chip, page, reg, &val, 1);
-}
-
-/* ── AW20216S initialization ─────────────────────────────────────────── */
-
-static void aw_chip_init(uint8_t chip) {
-    aw_write_single(chip, AW_PAGE_CONFIG, AW_REG_RSTN, AW_RESET_VAL);
-    k_busy_wait(2000);
-
-    aw_write_single(chip, AW_PAGE_CONFIG, AW_REG_GCR, 0x01);
-    aw_write_single(chip, AW_PAGE_CONFIG, AW_REG_GCCR, 0xFF);
-
-    /* All scaling to max */
-    uint8_t scaling[AW_PWM_CHANNELS];
-    memset(scaling, 0xFF, sizeof(scaling));
-    aw_write(chip, AW_PAGE_SCALE, 0x00, scaling, AW_PWM_CHANNELS);
-
-    /* All PWM off */
-    uint8_t zeros[AW_PWM_CHANNELS];
-    memset(zeros, 0x00, sizeof(zeros));
-    aw_write(chip, AW_PAGE_PWM, 0x00, zeros, AW_PWM_CHANNELS);
-}
-
-/* ── LED power control ───────────────────────────────────────────────── */
-
-static void led_power_on(void) {
-    /*
-     * PC2 = LED power MOSFET gate (active HIGH).
-     * Full initialization sequence mirrored from Rainy75 led_strip_b91_spi.c:
-     * 1. Set PC2 to GPIO mode
-     * 2. Clear OEN (enable output driver)
-     * 3. Disable analog input enable (CRITICAL — without this, analog
-     *    circuitry may sink the output and prevent driving the MOSFET)
-     * 4. Drive HIGH (power on)
-     * 5. Configure pull-up (10K) for stable drive
-     */
-    REG_GPIO_PC_FUNC |= PC2_BIT;                         /* 1. GPIO mode */
-    REG_GPIO_PC_OEN &= ~PC2_BIT;                         /* 2. Output enable */
-    ana_write(AREG_GPIO_PC_IE, ana_read(AREG_GPIO_PC_IE) & ~PC2_BIT);  /* 3. Disable analog IE */
-    REG_GPIO_PC_OUT |= PC2_BIT;                          /* 4. Drive HIGH */
-    uint8_t pull = ana_read(AREG_GPIO_PC_PULL);
-    ana_write(AREG_GPIO_PC_PULL, (pull & ~(0x03 << 4)) | (0x01 << 4)); /* 5. PC2 pull-up 10K */
-
-    k_msleep(50);
-
-    LOG_INF("PC2 power: OUT=0x%02x OEN=0x%02x FUNC=0x%02x ANA_IE=0x%02x ANA_PULL=0x%02x",
-            REG_GPIO_PC_OUT, REG_GPIO_PC_OEN, REG_GPIO_PC_FUNC,
-            ana_read(AREG_GPIO_PC_IE), ana_read(AREG_GPIO_PC_PULL));
-}
-
-static void led_power_off(void) {
-    REG_GPIO_PC_OUT &= ~PC2_BIT;
-}
-
-/* ── Frame update ────────────────────────────────────────────────────── */
-
-static void rgb_update_frame(void) {
-    if (!rgb_enabled || !rgb_initialized) {
-        return;
-    }
-
-    /* No irq_lock for now — allows USB/BLE to stay responsive.
-     * Kscan may glitch during transfer but won't permanently break. */
-    aw_write(0, AW_PAGE_PWM, 0x00, chip0_pwm, AW_PWM_CHANNELS);
-    aw_write(1, AW_PAGE_PWM, 0x00, chip1_pwm, AW_PWM_CHANNELS);
-
-    /* Restore pins for kscan */
+    /* Restore pins to HIGH (kscan idle) */
     REG_GPIO_PE_OUT |= (PE1_BIT | PE2_BIT);
+
+    for (volatile int d = 0; d < 30; d++) {}
 }
 
-/* ── Public API ──────────────────────────────────────────────────────── */
+static void bb_spi_write_single(uint8_t chip, uint8_t page, uint8_t reg, uint8_t val) {
+    bb_spi_write(chip, page, reg, &val, 1);
+}
 
-void crush80_rgb_set_led(uint8_t index, uint8_t r, uint8_t g, uint8_t b) {
-    if (index >= CRUSH80_LED_COUNT_TOTAL) {
-        return;
-    }
-    uint16_t ch_offset = (uint16_t)index * 3;
-    if (index < 72) {
-        if (ch_offset + 2 < AW_PWM_CHANNELS) {
-            chip0_pwm[ch_offset + 0] = r;
-            chip0_pwm[ch_offset + 1] = g;
-            chip0_pwm[ch_offset + 2] = b;
+/* ── AW20216S init + set color ─────────────────────────────────── */
+
+static void aw_init_and_set_color(uint8_t r, uint8_t g, uint8_t b) {
+    unsigned int key = irq_lock();
+
+    /* Init both chips */
+    for (uint8_t chip = 0; chip < 2; chip++) {
+        bb_spi_write_single(chip, AW_PAGE_CONFIG, AW_REG_RSTN, AW_RESET_VAL);
+        k_busy_wait(2000);
+        bb_spi_write_single(chip, AW_PAGE_CONFIG, AW_REG_GCR, 0x01);
+        bb_spi_write_single(chip, AW_PAGE_CONFIG, AW_REG_GCCR, 0xFF);
+
+        /* Scaling all max */
+        uint8_t buf[AW_PWM_CHANNELS];
+        memset(buf, 0xFF, sizeof(buf));
+        bb_spi_write(chip, AW_PAGE_SCALE, 0x00, buf, AW_PWM_CHANNELS);
+
+        /* Set PWM to requested color pattern (repeating R,G,B) */
+        for (int i = 0; i < AW_PWM_CHANNELS; i += 3) {
+            buf[i] = r;
+            buf[i+1] = (i+1 < AW_PWM_CHANNELS) ? g : 0;
+            buf[i+2] = (i+2 < AW_PWM_CHANNELS) ? b : 0;
         }
-    } else {
-        uint16_t offset = (uint16_t)(index - 72) * 3;
-        if (offset + 2 < AW_PWM_CHANNELS) {
-            chip1_pwm[offset + 0] = r;
-            chip1_pwm[offset + 1] = g;
-            chip1_pwm[offset + 2] = b;
-        }
+        bb_spi_write(chip, AW_PAGE_PWM, 0x00, buf, AW_PWM_CHANNELS);
     }
+
+    irq_unlock(key);
 }
 
-void crush80_rgb_set_all(uint8_t r, uint8_t g, uint8_t b) {
-    for (uint8_t i = 0; i < CRUSH80_LED_COUNT_TOTAL; i++) {
-        crush80_rgb_set_led(i, r, g, b);
-    }
-}
+/* ── Main diagnostic thread ──────────────────────────────────────── */
 
-void crush80_rgb_toggle(void) {
-    rgb_enabled = !rgb_enabled;
-    if (!rgb_enabled) {
-        memset(chip0_pwm, 0, sizeof(chip0_pwm));
-        memset(chip1_pwm, 0, sizeof(chip1_pwm));
-        rgb_update_frame();
-        led_power_off();
-    } else {
-        led_power_on();
-    }
-}
+static void rgb_diag_thread(void *p1, void *p2, void *p3) {
+    ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
 
-bool crush80_rgb_is_on(void) {
-    return rgb_enabled;
-}
+    k_msleep(3000);
+    LOG_INF("=== RGB DIAGNOSTIC: cycling all SPI modes ===");
 
-/* ── Background thread ───────────────────────────────────────────────── */
+    /* Power on PC2 (try HIGH first) */
+    REG_GPIO_PC_IE &= ~PC2_BIT;
+    REG_GPIO_PC_OEN &= ~PC2_BIT;
+    REG_GPIO_PC_OUT |= PC2_BIT;
+    k_msleep(50);
+    LOG_INF("PC2 driven HIGH");
 
-static void rgb_thread_fn(void *p1, void *p2, void *p3) {
-    ARG_UNUSED(p1);
-    ARG_UNUSED(p2);
-    ARG_UNUSED(p3);
-
-    k_msleep(6000);  /* Wait for MCUboot confirm (runs at 5s) before LED init */
-
-    LOG_INF("crush80_rgb: powering on LED rail");
-    led_power_on();
-
-    LOG_INF("crush80_rgb: configuring GPIO bit-bang SPI + initializing AW20216S");
-
-    /* GPIO bit-bang mode: keep PE1/PE2 in GPIO mode, ensure output enabled */
-    REG_GPIO_PE_FUNC |= (PE1_BIT | PE2_BIT);  /* GPIO mode */
-    REG_GPIO_PE_OEN &= ~(PE1_BIT | PE2_BIT | PE0_BIT);  /* output enable */
-    REG_GPIO_PE_OUT |= (PE1_BIT | PE0_BIT);   /* CLK HIGH idle, CS HIGH */
-    REG_GPIO_PC_OEN &= ~PC0_BIT;             /* PC0 CS output */
-    REG_GPIO_PC_OUT |= PC0_BIT;              /* PC0 CS HIGH */
-
-    LOG_INF("GPIO bitbang: PE_FUNC=0x%02x PE_OEN=0x%02x PE_OUT=0x%02x",
-            REG_GPIO_PE_FUNC, REG_GPIO_PE_OEN, REG_GPIO_PE_OUT);
-    aw_chip_init(0);
-    LOG_INF("After chip0 init (bitbang): done");
-    aw_chip_init(1);
-
-    rgb_initialized = true;
-    LOG_INF("crush80_rgb: init complete, PE_FUNC=0x%02x", REG_GPIO_PE_FUNC);
-
-    /* Test pattern: all PWM to max */
-    memset(chip0_pwm, 0xFF, sizeof(chip0_pwm));
-    memset(chip1_pwm, 0xFF, sizeof(chip1_pwm));
-
-    LOG_INF("crush80_rgb: starting first frame");
-    rgb_update_frame();
-    LOG_INF("crush80_rgb: first frame done, entering loop");
-
+    int cycle = 0;
     while (1) {
-        if (rgb_enabled) {
-            rgb_update_frame();
+        int mode = cycle % 7;
+        cycle++;
+
+        /* Configure mode */
+        switch (mode) {
+            case 0: /* RED = Mode 0, normal pins, PC2 HIGH */
+                cpol = false; cpha = false;
+                clk_bit = PE1_BIT; mosi_bit = PE2_BIT;
+                REG_GPIO_PC_OUT |= PC2_BIT;
+                LOG_INF("[%d] RED: Mode0 CPOL=0 CPHA=0, PE1=CLK PE2=MOSI, PC2=HIGH", cycle);
+                aw_init_and_set_color(0xFF, 0x00, 0x00);
+                break;
+
+            case 1: /* GREEN = Mode 1, normal pins, PC2 HIGH */
+                cpol = false; cpha = true;
+                clk_bit = PE1_BIT; mosi_bit = PE2_BIT;
+                REG_GPIO_PC_OUT |= PC2_BIT;
+                LOG_INF("[%d] GREEN: Mode1 CPOL=0 CPHA=1, PE1=CLK PE2=MOSI, PC2=HIGH", cycle);
+                aw_init_and_set_color(0x00, 0xFF, 0x00);
+                break;
+
+            case 2: /* BLUE = Mode 2, normal pins, PC2 HIGH */
+                cpol = true; cpha = false;
+                clk_bit = PE1_BIT; mosi_bit = PE2_BIT;
+                REG_GPIO_PC_OUT |= PC2_BIT;
+                LOG_INF("[%d] BLUE: Mode2 CPOL=1 CPHA=0, PE1=CLK PE2=MOSI, PC2=HIGH", cycle);
+                aw_init_and_set_color(0x00, 0x00, 0xFF);
+                break;
+
+            case 3: /* WHITE = Mode 3, normal pins, PC2 HIGH */
+                cpol = true; cpha = true;
+                clk_bit = PE1_BIT; mosi_bit = PE2_BIT;
+                REG_GPIO_PC_OUT |= PC2_BIT;
+                LOG_INF("[%d] WHITE: Mode3 CPOL=1 CPHA=1, PE1=CLK PE2=MOSI, PC2=HIGH", cycle);
+                aw_init_and_set_color(0xFF, 0xFF, 0xFF);
+                break;
+
+            case 4: /* PURPLE = Mode 0, SWAPPED pins, PC2 HIGH */
+                cpol = false; cpha = false;
+                clk_bit = PE2_BIT; mosi_bit = PE1_BIT;  /* SWAPPED! */
+                REG_GPIO_PC_OUT |= PC2_BIT;
+                LOG_INF("[%d] PURPLE: Mode0 SWAPPED PE2=CLK PE1=MOSI, PC2=HIGH", cycle);
+                aw_init_and_set_color(0xFF, 0x00, 0xFF);
+                break;
+
+            case 5: /* YELLOW = Mode 0, normal pins, PC2 LOW (inverted power) */
+                cpol = false; cpha = false;
+                clk_bit = PE1_BIT; mosi_bit = PE2_BIT;
+                REG_GPIO_PC_OUT &= ~PC2_BIT;  /* INVERTED! */
+                LOG_INF("[%d] YELLOW: Mode0 normal pins, PC2=LOW (inverted)", cycle);
+                k_msleep(50);
+                aw_init_and_set_color(0xFF, 0xFF, 0x00);
+                break;
+
+            case 6: /* CYAN = Mode 3, normal pins, PC2 LOW (inverted power) */
+                cpol = true; cpha = true;
+                clk_bit = PE1_BIT; mosi_bit = PE2_BIT;
+                REG_GPIO_PC_OUT &= ~PC2_BIT;  /* INVERTED! */
+                LOG_INF("[%d] CYAN: Mode3 normal pins, PC2=LOW (inverted)", cycle);
+                k_msleep(50);
+                aw_init_and_set_color(0x00, 0xFF, 0xFF);
+                break;
         }
-        k_msleep(RGB_REFRESH_MS);
+
+        /* Hold for 5 seconds before next mode */
+        k_msleep(5000);
     }
 }
 
-/* ── System init ─────────────────────────────────────────────────────── */
+/* ── Stubs for public API (required by header) ───────────────────── */
+void crush80_rgb_set_led(uint8_t index, uint8_t r, uint8_t g, uint8_t b) {}
+void crush80_rgb_set_all(uint8_t r, uint8_t g, uint8_t b) {}
+void crush80_rgb_toggle(void) {}
+bool crush80_rgb_is_on(void) { return true; }
+
+/* ── System init ─────────────────────────────────────────────────── */
 
 static int crush80_rgb_sys_init(void) {
     k_thread_create(&rgb_thread_data, rgb_stack,
                     K_THREAD_STACK_SIZEOF(rgb_stack),
-                    rgb_thread_fn, NULL, NULL, NULL,
+                    rgb_diag_thread, NULL, NULL, NULL,
                     RGB_THREAD_PRIORITY, 0, K_NO_WAIT);
-    k_thread_name_set(&rgb_thread_data, "crush80_rgb");
-    LOG_INF("crush80_rgb: thread created");
+    k_thread_name_set(&rgb_thread_data, "rgb_diag");
+    LOG_INF("crush80_rgb: DIAGNOSTIC MODE — cycling SPI modes");
     return 0;
 }
 
