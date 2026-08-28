@@ -125,7 +125,7 @@ $MCUMGR --conntype serial --connstring "$CONN" image upload "$FIRMWARE"
 echo ""
 
 echo "Getting slot 1 hash..."
-HASH=$($MCUMGR --conntype serial --connstring "$CONN" image list | grep -A2 "slot=1" | grep hash | awk '{print $2}')
+HASH=$($MCUMGR --conntype serial --connstring "$CONN" image list 2>&1 | awk '/slot=1/{f=1} f&&/hash:/{print $2;exit}')
 if [ -z "$HASH" ]; then
     echo "ERROR: Could not find slot 1 hash. Upload may have failed."
     exit 1
