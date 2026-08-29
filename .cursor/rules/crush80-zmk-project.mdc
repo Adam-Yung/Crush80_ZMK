@@ -42,9 +42,15 @@ Hardware never responds → system hangs permanently with all interrupts masked.
 
 5. If the keyboard hangs after flashing: run `python3 scripts/force_recovery.py`
 
+## Default Firmware
+- **Release:** `releases/Crush80-No-RGB.bin` (RGB disabled, battery optimized)
+- Features: Mac mode (Fn+M), HRM, 5 BT profiles (Fn+1-5), USB (Fn+6), 1min idle, 5min deep sleep
+- Logging disabled for battery life (uncomment in app.conf to re-enable)
+- This is the go-to firmware for daily use until RGB is resolved
+
 ## Build & Flash
 - Build: `bash build.sh --skip-bridge --skip-mcuboot`
-- Flash: `bash flash.sh` (or `bash flash.sh --build` for build+flash)
+- Flash: `bash update.sh`
 - Recovery (system hung): `python3 scripts/force_recovery.py` → unplug/replug → upload good firmware
 - Recovery (SMP unresponsive): `python3 scripts/recovery_flash.py` (unplug/replug race)
 

@@ -1,0 +1,10 @@
+/* Diagnostic overlay: disable kscan to test LED SPI without interference */
+/ {
+    chosen {
+        /delete-property/ zmk,kscan;
+    };
+};
+
+&kscan0 {
+    status = "disabled";
+};
