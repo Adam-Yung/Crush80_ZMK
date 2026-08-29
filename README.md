@@ -29,6 +29,20 @@ bash build.sh --skip-bridge --skip-mcuboot
 
 This builds the ZMK firmware using the stock keymap. Output: `dist/crush80-zmk-app.signed.bin`
 
+### Pre-built Firmware
+
+If you don't want to build from source, use the pre-built release:
+
+| File | Description |
+|------|-------------|
+| `releases/Crush80-No-RGB.bin` | Default firmware — no RGB, battery optimized, 5 BT profiles, Mac mode |
+
+Flash a pre-built release:
+```bash
+CRUSH80_FIRMWARE=releases/Crush80-No-RGB.bin bash update.sh
+# Then unplug/replug
+```
+
 ### 3. Install ZMK on a stock Crush 80
 
 If your keyboard is still running the manufacturer firmware:
