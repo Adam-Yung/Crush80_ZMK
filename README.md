@@ -51,7 +51,7 @@ If your keyboard is still running the manufacturer firmware:
 bash install_zmk.sh
 ```
 
-This uses the OTA bridge method to replace the stock firmware with ZMK. Fully reversible with `bash restore_stock.sh`.
+This uses the OTA bridge method to replace the stock firmware with ZMK. To revert, use `python3 scripts/flash_mgmt_upload.py` with the stock firmware binary.
 
 ### 4. Update firmware (keyboard already running ZMK)
 
@@ -143,7 +143,7 @@ bash update.sh
 | `update.sh` | Flash firmware onto a running ZMK keyboard |
 | `flash.sh` | Flash with DTR wake + test/confirm flow |
 | `install_zmk.sh` | First-time install from stock manufacturer firmware |
-| `restore_stock.sh` | Revert to original manufacturer firmware |
+| `restore_stock.sh` | Revert to original manufacturer firmware (requires `flash_mgmt_upload.py`) |
 | `scripts/force_recovery.py` | **EMERGENCY**: Force MCUboot recovery when system is hung |
 | `scripts/recovery_flash.py` | Recovery flash when SMP is unresponsive |
 
@@ -154,7 +154,7 @@ If the keyboard stops responding after a bad flash:
 1. **Unplug and replug** — MCUboot auto-reverts if the new firmware doesn't confirm within 11 seconds
 2. **Force MCUboot recovery** — `python3 scripts/force_recovery.py` (erases slot 0 header, forces MCUboot serial recovery on next boot). **Use this when the system hangs and normal upload can't complete.**
 3. **Recovery flash** — `python3 scripts/recovery_flash.py` (unplug, run script, replug when prompted)
-4. **Restore stock** — `bash restore_stock.sh`
+4. **Restore stock** — Use `python3 scripts/flash_mgmt_upload.py firmware/Wobkey_Crush_80_Patched_Firmware/firmware/v2_patched.bin` to write stock firmware directly to flash. Note: `restore_stock.sh` uses a non-functional mcumgr subcommand — use the Python script instead.
 
 ## Project Structure
 
