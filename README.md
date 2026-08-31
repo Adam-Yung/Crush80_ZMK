@@ -141,20 +141,23 @@ bash update.sh
 | `setup.sh` | One-time environment setup (SDK, west, mcumgr) |
 | `build.sh` | Build ZMK firmware from source |
 | `update.sh` | Flash firmware onto a running ZMK keyboard |
-| `flash.sh` | Flash with DTR wake + test/confirm flow |
 | `install_zmk.sh` | First-time install from stock manufacturer firmware |
-| `restore_stock.sh` | Revert to original manufacturer firmware (requires `flash_mgmt_upload.py`) |
+| `fetch_ble_blob.sh` | Download Telink BLE binary blob |
 | `scripts/force_recovery.py` | **EMERGENCY**: Force MCUboot recovery when system is hung |
+| `scripts/flash_mgmt_upload.py` | Write firmware to flash in 256-byte chunks (for bricked keyboards) |
+| `scripts/flash_ota.py` | Stage 1 OTA flash for initial ZMK install |
 | `scripts/recovery_flash.py` | Recovery flash when SMP is unresponsive |
+| `scripts/emergency_upload.py` | Power-cycle upload for hung firmware |
 
 ## Recovery
 
 If the keyboard stops responding after a bad flash:
 
 1. **Unplug and replug** — MCUboot auto-reverts if the new firmware doesn't confirm within 11 seconds
-2. **Force MCUboot recovery** — `python3 scripts/force_recovery.py` (erases slot 0 header, forces MCUboot serial recovery on next boot). **Use this when the system hangs and normal upload can't complete.**
-3. **Recovery flash** — `python3 scripts/recovery_flash.py` (unplug, run script, replug when prompted)
-4. **Restore stock** — Use `python3 scripts/flash_mgmt_upload.py firmware/Wobkey_Crush_80_Patched_Firmware/firmware/v2_patched.bin` to write stock firmware directly to flash. Note: `restore_stock.sh` uses a non-functional mcumgr subcommand — use the Python script instead.
+2. **Force MCUboot recovery** — `python3 scripts/force_recovery.py` (erases slot 0 header, forces MCUboot serial recovery on next boot)
+3. **nRF Connect Device Manager** — Install on phone, connect via BLE, tap "Reset to firmware loader mode"
+4. **Recovery flash** — `python3 scripts/recovery_flash.py` (unplug, run script, replug when prompted)
+5. **Restore stock** — `python3 scripts/flash_mgmt_upload.py firmware/Wobkey_Crush_80_Patched_Firmware/firmware/v2_patched.bin`
 
 ## Project Structure
 
