@@ -22,6 +22,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  CRUSH80_KEYMAP: ${{ github.workspace }}/keymaps/personal.keymap
   SDK_VERSION: "0.17.0"
   WORKSPACE_DIR: /home/runner/Projects/crush80-workspace
 

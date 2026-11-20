@@ -29,3 +29,7 @@ Keys, USB HID, BLE with 5 profiles, Mac mode, deep sleep, MCUmgr over USB serial
 ## 2026-11-19: first CI image did not enumerate
 CI image (hal_telink at `main`) was swapped in as a trial, showed no serial port, and a power cycle reverted to the known-good image (revert path works).
 Suspected cause: `hal_telink` was unpinned. Now pinned to 4226c7fc (the commit the known-good build used); CI fails if it drifts. Not yet confirmed by a successful trial boot.
+
+## 2026-11-20: what the first CI trial image taught us
+The first CI image booted (keyboard typed) but never showed a USB serial port. It was built from `keymaps/stock.keymap` and a trimmed `conf/app.conf`, not the owner's personal config that built the known-good image.
+CI now builds `keymaps/personal.keymap` (the owner's keymap with the password macro replaced by a placeholder; the real one stays in `~/.config/DOTFILES`, which local `build.sh` prefers) and `conf/app.conf` is back to the proven LOG/console lines. `hal_telink` pin did not change the image. Still unverified on hardware.
