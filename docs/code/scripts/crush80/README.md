@@ -15,3 +15,5 @@ Host tool behind `./crush80`. Standard library only. Design: `docs/features/inst
 
 Invariants with named tests (`scripts/tests/test_flows.py`): an unconfirmed running image blocks an update; a corrupt image never reaches the board; a reverted board is never confirmed;
 a missing or altered golden image blocks every flash; confirmation happens only after the user says yes; stock commit needs a backup.
+
+**`cbor.py`:** minimal CBOR for SMP. Decodes indefinite-length arrays and maps (Zephyr's SMP encoder emits them); before 2026-11-20 it did not and dropped every board reply (`incidents/2026-11-20-smp-cbor-indefinite.md`).

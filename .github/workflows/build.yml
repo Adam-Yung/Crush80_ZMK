@@ -7,6 +7,27 @@ on:
   push:
     branches: [main, rgb-and-safe-install]
   pull_request:
+  # Reusable: a private repo that holds a personal keymap calls this workflow so the keymap never
+  # enters this public repo and the build (and its artifact) stay private. See docs/guides/keymap.md.
+  workflow_call:
+    inputs:
+      firmware_repo:
+        description: "Repository holding the firmware sources (owner/name)"
+        type: string
+        required: true
+      firmware_ref:
+        description: "Commit SHA of the firmware sources to build (pin it)"
+        type: string
+        required: true
+      keymap_path:
+        description: "Path of the keymap file inside the CALLING repository"
+        type: string
+        required: true
+      app_conf_path:
+        description: "Optional path of an app.conf inside the CALLING repository"
+        type: string
+        required: false
+        default: ""
   workflow_dispatch:
     inputs:
       src_ref:
@@ -22,7 +43,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CRUSH80_KEYMAP: ${{ github.workspace }}/keymaps/personal.keymap
+  # Public repo's own builds use the generic keymap; a caller's keymap is added in the build job.
+  CRUSH80_KEYMAP: ${{ github.workspace }}/keymaps/stock.keymap
   SDK_VERSION: "0.17.0"
   WORKSPACE_DIR: /home/runner/Projects/crush80-workspace
 
@@ -32,6 +54,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ inputs.firmware_repo || github.repository }}
+          ref: ${{ inputs.firmware_ref || github.sha }}
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
@@ -44,7 +69,26 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          repository: ${{ inputs.firmware_repo || github.repository }}
+          ref: ${{ inputs.firmware_ref || github.sha }}
           fetch-depth: 0
+      - name: Check out the calling repository (personal keymap), when called
+        if: inputs.keymap_path != ''
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          path: _caller
+      - name: Select the caller's keymap and config
+        if: inputs.keymap_path != ''
+        env:
+          KEYMAP_PATH: ${{ inputs.keymap_path }}
+          APP_CONF_PATH: ${{ inputs.app_conf_path }}
+        run: |
+          test -f "_caller/$KEYMAP_PATH"
+          echo "CRUSH80_KEYMAP=$GITHUB_WORKSPACE/_caller/$KEYMAP_PATH" >> "$GITHUB_ENV"
+          if [ -n "$APP_CONF_PATH" ]; then
+            test -f "_caller/$APP_CONF_PATH"
+            echo "CRUSH80_APP_CONF=$GITHUB_WORKSPACE/_caller/$APP_CONF_PATH" >> "$GITHUB_ENV"
+          fi
       - name: Overlay older sources (diagnostic runs only)
         if: inputs.src_ref != ''
         env:
@@ -130,6 +174,7 @@ jobs:
           done
           {
             echo "commit: $GITHUB_SHA"
+            echo "firmware: $(git rev-parse HEAD)"
             echo "run:    $GITHUB_RUN_ID"
             echo "zmk:    $(git -C "$WORKSPACE_DIR/zmk-src" rev-parse HEAD)"
             echo "zephyr: $(git -C "$WORKSPACE_DIR/zephyr" rev-parse HEAD)"

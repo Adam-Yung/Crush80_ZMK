@@ -2,7 +2,8 @@
 
 How to put firmware on the board without risking it. The design reasoning is in `features/install-mechanism.md`; when something goes wrong, `guides/recovery.md`.
 
-**Status: the host tool is unit-tested but has not yet run against the board.** First run: `guides/hardware-test-plan.md`.
+**Status (2026-11-20): proven on the board for `status`, `backup`, `confirm`, and trial boot of CI-built plain and RGB images (upload, trial boot, confirm).** Not yet exercised on hardware: the automatic revert after a *failed* trial through `update` (it happened by hand twice and worked), `recover`, `stock-restore`. See `guides/hardware-test-plan.md`.
+Where the image comes from: normally a CI build, see `guides/keymap.md`; a local `build.sh` build works the same way.
 
 ## The rules in one paragraph
 
@@ -36,6 +37,9 @@ bash build.sh --skip-bridge            # or add --rgb for the Reboot Pro RGB bui
    - **Old hash running**: the new image failed to start and MCUboot reverted. Nothing to do; the board is safe. Fix the build.
    - **No port or no answer**: unplug, wait 5 seconds, replug. The previous image returns. Still nothing: `./crush80 recover`.
 7. If you answer `n`, it leaves the image unconfirmed. Unplug and replug to go back.
+
+**Uploads can stall** on the running ZMK image (seen 2026-11-20: 10 minutes with no progress; cause unknown, upstream USB patches are a candidate). Ctrl-C is safe. The manual `mcumgr` route in `guides/keymap.md` worked. Do not type on the keyboard during an upload.
+**The trial can look dead for a few seconds** after a replug: the USB serial port appears 10 to 15 s after the keyboard types. Wait before concluding anything, and read `./crush80 status` before touching the power switch (a power-switch cycle reverts an unconfirmed trial).
 
 A trial that you neither confirm nor revert reverts at the next cold boot, including a deep-sleep wake. That is deliberate.
 

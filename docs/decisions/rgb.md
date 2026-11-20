@@ -14,3 +14,7 @@ The default build has no RGB code, so the daily-use firmware is not exposed to a
 ## 2026-11-19: the board model is a precondition, not an assumption
 
 The patch's pin map is verified for a Reboot Pro, not necessarily for this board; the older Ghidra reading says AW20216S. `docs/features/rgb.md` says how to tell (PCB inspection) before flashing.
+
+## 2026-11-20
+**Brightness cap stays at 25 %** (`conf/rgb.conf`, `ZMK_RGB_UNDERGLOW_BRT_MAX`). Measured on the board: all 154 LEDs light, dimmer than stock. 154 WS2812 draw far more than a USB port gives at full brightness, and the owner prefers the battery life. Raise only with a current measurement.
+**Backlight colour follows layer and held modifier** through one small listener (`zmk/src/layer_rgb.c`) instead of porting upstream's per-key engine: ZMK underglow has a single colour, which is all the owner asked for. Base layer backlight is off (LED power cut), every other layer has a colour. The per-key engine in Ritwick Verma's fork remains an option if per-key effects are wanted.

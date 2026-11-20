@@ -27,5 +27,12 @@ if grep -rn "aw20216s\|AW20216S" zmk conf --include=* -l 2>/dev/null | grep -q .
     echo "FAILED: stale AW20216S references in zmk/ or conf/"; fail=1
 fi
 
+step "no personal keymap in this public repo"
+# The personal keymap lives in the private keybindings repo (docs/decisions/keymap-private.md).
+extra="$(git ls-files '*.keymap' | grep -v -x -e keymaps/stock.keymap -e keymaps/example.keymap || true)"
+if [ -n "$extra" ]; then
+    echo "FAILED: tracked keymap(s) outside the generic allowlist: $extra"; fail=1
+fi
+
 [ $fail -eq 0 ] && echo "GATE PASSED" || echo "GATE FAILED"
 exit $fail

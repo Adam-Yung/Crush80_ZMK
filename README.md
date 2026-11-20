@@ -5,10 +5,11 @@ Custom ZMK firmware for the Wobkey Crush 80 mechanical keyboard (Telink TLSR9518
 ## Features
 
 - Full ZMK support: USB HID, Bluetooth 5.0, MCUboot DFU
-- Optional [RGB build for the Crush 80 Reboot Pro](docs/features/rgb.md)
+- [RGB build for the Crush 80 Reboot Pro](docs/features/rgb.md): per-layer and per-modifier backlight colours, verified on the board
+- **Safe updates:** every new firmware boots as a trial and reverts on a power cycle until you confirm it (`./crush80 update`)
 - MCUmgr firmware updates over USB serial (no special hardware needed)
-- Stock QWERTY keymap included (ready to flash out of the box)
-- Example advanced keymap with Home Row Mods, Nav/Sym layers, Mac mode
+- Built in CI (GitHub Actions), downloaded with verified hashes, flashed only through `./crush80`
+- Stock QWERTY keymap included (ready to flash out of the box); bring your own keymap from a private repo ([how](docs/guides/keymap.md))
 
 ## Quick Start (New User)
 
@@ -56,13 +57,18 @@ bash install_zmk.sh
 
 This uses the stock firmware's own OTA protocol to bring in a bridge image, which then installs ZMK. To go back to stock: `./crush80 stock-restore` (see [install and upgrade](docs/guides/install-and-upgrade.md)).
 
-### 4. Update firmware (keyboard already running ZMK)
+### 4. Load new firmware (keyboard already running ZMK)
+
+The usual route is a **CI build**, so no local toolchain is needed:
 
 ```bash
+git push                                          # CI builds a plain and an RGB image (Actions tab, about 5 min)
+scripts/ci/fetch-build.sh                         # download the run for HEAD, verify hashes, check the images (never flashes)
 ./crush80 backup                                  # once: full flash dump, read-only, ~3 min
-bash build.sh --skip-bridge                       # or add --rgb
-./crush80 update dist/crush80-zmk-app.signed.bin  # same as: bash update.sh --build
+./crush80 update ci-downloads/<run>/crush80-firmware-*/crush80-zmk-app-rgb.signed.bin   # the command fetch-build prints
 ```
+
+Or build locally (needs the west workspace): `bash build.sh --skip-bridge [--rgb]` then `./crush80 update dist/crush80-zmk-app.signed.bin`.
 
 The new image boots as a **trial**: you unplug and replug, test the keyboard, and only then does the tool confirm it. Until it is confirmed, another unplug and replug restores the previous image,
 even if the new firmware is dead. The bootloader is never rewritten. Full procedure: [docs/guides/install-and-upgrade.md](docs/guides/install-and-upgrade.md).
@@ -75,28 +81,28 @@ Unplug, wait 5 s, replug: an unconfirmed trial reverts. If the board hangs after
 
 ## Keymap Configuration
 
-### Available keymaps
+This repo is public and holds **only generic keymaps**. A personal keymap (and any text macros in it) belongs in a **private** repo; the gate fails if one is committed here.
 
 | File | Description |
 |------|-------------|
-| `keymaps/stock.keymap` | Standard QWERTY + Fn layer (BT/USB controls). Default. |
-| `keymaps/example.keymap` | Advanced: Home Row Mods, Nav/ExtNav, Sym, Mac mode (9 layers) |
+| `keymaps/stock.keymap` | Standard QWERTY + Fn layer (BT/USB controls). Default, and what this repo's CI builds. |
+| `keymaps/example.keymap` | Advanced example: Home Row Mods, Nav/ExtNav, Sym, Mac mode (9 layers) |
 
-### Using a custom keymap
+### Using your own keymap
 
-Set the `CRUSH80_KEYMAP` environment variable before building:
+**In CI, privately (recommended):** keep `crush80.keymap` in a private repo and call this repo's reusable workflow from there; the keymap and the build artifact never become public. Setup, the exact workflow, and how to update a keymap: [docs/guides/keymap.md](docs/guides/keymap.md).
 
-```bash
-export CRUSH80_KEYMAP=/path/to/my/crush80.keymap
-bash build.sh --skip-bridge --skip-mcuboot
-bash update.sh
-```
+**Locally:** `export CRUSH80_KEYMAP=/path/to/crush80.keymap`, then `bash build.sh --skip-bridge --rgb` and `./crush80 update dist/crush80-zmk-app-rgb.signed.bin`.
 
-### Keymap selection priority
+### Keymap selection priority (local builds)
 
 1. `CRUSH80_KEYMAP` env var (explicit path to a `.keymap` file)
-2. Dotfiles directory (`~/.config/DOTFILES/keybindings/crush80-zmk/`)
+2. Dotfiles directory (`~/.config/DOTFILES/keybindings/crush80-zmk/`, or `CRUSH80_ZMK_CONFIG`)
 3. `keymaps/stock.keymap` (default)
+
+### Backlight colours
+
+With the RGB build and a `layer_rgb` node in the keymap, the backlight follows the active layer and held modifiers (any layer can also be set to off). See [docs/features/rgb.md](docs/features/rgb.md) and `docs/guides/keymap.md`.
 
 ## Environment Variables
 
@@ -117,7 +123,8 @@ bash update.sh
 | `install_zmk.sh` | First install from stock firmware. |
 | `setup.sh`, `fetch_ble_blob.sh`, `scripts/owner/install-deps.sh` | Owner-run setup and downloads. Agents never run these. |
 | `scripts/flash_ota.py` | Stock OTA protocol (used by `install_zmk.sh`). |
-| `scripts/gate/verify.sh` | Pre-commit gate: tests, syntax, doc links, known-good images. |
+| `scripts/gate/verify.sh` | Pre-commit gate: tests, syntax, doc links, known-good images, no personal keymap. |
+| `scripts/ci/fetch-build.sh` | Download and verify a CI build (`[run-id] [owner/repo]`); never flashes. |
 | `scripts/legacy/` | Hand-run recovery scripts kept until `./crush80 recover` is proven on hardware. |
 
 Rules for contributors and agents: [AGENTS.md](AGENTS.md). Docs map: [docs/README.md](docs/README.md).
@@ -125,7 +132,7 @@ Rules for contributors and agents: [AGENTS.md](AGENTS.md). Docs map: [docs/READM
 ## Project Structure
 
 ```
-keymaps/                Custom keymap files (stock.keymap, example.keymap)
+keymaps/                Generic keymaps only (stock.keymap, example.keymap); personal keymaps live in a private repo
 conf/                   Build configuration (app.conf, mcuboot.conf)
 zmk/                    ZMK module (board def, drivers, DTS, source)
   boards/crush80/       Board definition (DTS, defconfig, matrix)

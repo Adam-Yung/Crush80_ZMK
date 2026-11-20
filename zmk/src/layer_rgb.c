@@ -26,10 +26,13 @@ BUILD_ASSERT(DT_NUM_INST_STATUS_OKAY(DT_DRV_COMPAT) == 1, "need exactly one crus
 
 static const uint16_t layer_hue[] = DT_INST_PROP(0, layer_hues);
 static const uint16_t layer_sat[] = DT_INST_PROP(0, layer_sats);
+static const uint16_t layer_on[] = DT_INST_PROP(0, layer_on);
 static const uint16_t mod_hue[] = DT_INST_PROP(0, mod_hues);
 static const uint16_t mod_sat[] = DT_INST_PROP(0, mod_sats);
 
-BUILD_ASSERT(ARRAY_SIZE(layer_hue) == ARRAY_SIZE(layer_sat), "layer-hues/layer-sats length differ");
+BUILD_ASSERT(ARRAY_SIZE(layer_hue) == ARRAY_SIZE(layer_sat) &&
+                 ARRAY_SIZE(layer_hue) == ARRAY_SIZE(layer_on),
+             "layer-hues, layer-sats and layer-on need the same length");
 BUILD_ASSERT(ARRAY_SIZE(mod_hue) == 4 && ARRAY_SIZE(mod_sat) == 4, "mod-hues/mod-sats need 4 entries");
 
 #define USAGE_PAGE_KEYBOARD 0x07
@@ -42,8 +45,16 @@ static uint8_t mods_held;
 /* Which class wins when several modifiers are held: Gui, Alt, Ctrl, Shift. Indexes are class numbers. */
 static const uint8_t class_priority[] = {3, 2, 0, 1};
 
+/* The brightness the user chose with the brightness keys. Kept here because a layer with the
+ * backlight off drives the brightness to 0, which must not forget it. */
+static uint8_t user_brightness = 25;
+
 static void apply(void) {
-    struct zmk_led_hsb color = zmk_rgb_underglow_calc_brt(0); /* current colour; keeps brightness */
+    struct zmk_led_hsb color = zmk_rgb_underglow_calc_brt(0); /* current colour and brightness */
+    if (color.b > 0) {
+        user_brightness = color.b;
+    }
+    color.b = user_brightness;
 
     int cls = -1;
     for (size_t i = 0; i < ARRAY_SIZE(class_priority); i++) {
@@ -64,6 +75,9 @@ static void apply(void) {
         }
         color.h = layer_hue[layer];
         color.s = layer_sat[layer];
+        if (!layer_on[layer]) {
+            color.b = 0; /* all LEDs black: the driver cuts LED power */
+        }
     }
 
     int rc = zmk_rgb_underglow_set_hsb(color);

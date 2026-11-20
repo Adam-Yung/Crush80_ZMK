@@ -17,9 +17,9 @@ Where each kind of document lives. `AGENTS.md` at the repo root has the rules; t
 | Folder | What is in it |
 |---|---|
 | `features/` | Current design of a whole feature: `install-mechanism`, `flash-layout`, `rgb`, `receiver`. |
-| `guides/` | How to do something: `install-and-upgrade`, `recovery`, `build`, `hardware-test-plan`. |
+| `guides/` | How to do something: `install-and-upgrade`, `keymap`, `recovery`, `build`, `hardware-test-plan`. |
 | `code/` | One file per source file at the same relative path: the file-specific "why". Partial coverage. |
-| `decisions/` | Append-only log: `install-safety`, `rgb`, `tooling`. |
+| `decisions/` | Append-only log: `install-safety`, `keymap-private`, `rgb`, `tooling`. |
 | `incidents/` | What went wrong, why it was possible, what changed. One dated file each. |
 | `history/` | Finished investigations and plans (the AW20216S RGB attempts, the Ghidra notes). Not current design. |
 | `reference/` | Captured third-party material: udev rules, the stock VIA json and keymap backup. |

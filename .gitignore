@@ -42,3 +42,6 @@ firmware/
 .DS_Store
 backups/
 ci-downloads/
+
+# The personal keymap lives in the private keybindings repo. build.sh copies the chosen keymap here at build time.
+zmk/boards/crush80/crush80.keymap

@@ -29,6 +29,12 @@ bash build.sh --skip-bridge --rgb                      # dist/crush80-zmk-app-rg
 `--rgb` adds `conf/rgb.conf` (`CONFIG_CRUSH80_RGB=y`, underglow on, brightness capped at 25 %) and `conf/rgb.overlay` (the `telink,b91-spi-led-strip` node and `zmk,underglow`). The plain build has no RGB code in it.
 Keys with the supplied stock keymap: **Fn+Backspace** toggle, **Fn+Backslash** next effect (solid, breathing, spectrum, swirl), **Fn+Up / Fn+Down** brightness. Turning RGB off cuts LED power.
 
+## Backlight colours (layer and modifier)
+
+`zmk/src/layer_rgb.c` (`code/zmk/src/layer_rgb.c.md`) sets the underglow colour from a `layer_rgb` node in the keymap: one hue and saturation per layer (highest active layer wins), `layer-on = 0` to switch the backlight off on a layer (the personal keymap uses this for the Base layer: LED power is cut), and one colour per held modifier (Ctrl, Shift, Alt, Gui).
+Verified on the board 2026-11-20: colours follow layers and home-row mods. The backlight-off-on-Base option was added afterwards and is not yet verified. Stock and example keymaps have no such node, so the feature is simply absent there.
+Keys in the personal keymap: F5 / F6 dimmer / brighter, Pause on / off (and the Fn combos above).
+
 ## How the driver works (`zmk/drivers/led_strip/led_strip_b91_spi.c`)
 
 ZMK's underglow calls `led_strip_update_rgb()` with 154 pixels. The driver encodes each colour bit as one SPI byte at 6 MHz (`0xF0` = 1, `0xC0` = 0: highs of 0.67 µs and 0.33 µs, inside the WS2812B window),
