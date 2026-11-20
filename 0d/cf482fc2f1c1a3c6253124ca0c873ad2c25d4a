@@ -1,0 +1,14 @@
+.gitignore
+  h_9dd936968f9973 40-42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "0dcf482fc2f1c1a3c6253124ca0c873ad2c25d4a",
+  "prompts": {},
+  "humans": {
+    "h_9dd936968f9973": {
+      "author": "Adam Yung <adyung@paloaltonetworks.com>"
+    }
+  }
+}
