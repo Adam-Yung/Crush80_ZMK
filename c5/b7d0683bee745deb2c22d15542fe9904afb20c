@@ -1,0 +1,21 @@
+scripts/crush80/cbor.py
+  s_3a3dad266bc2e8::t_498e61345188f1 57-72
+scripts/tests/test_cbor_indefinite.py
+  s_3a3dad266bc2e8::t_7e1f2349440cfc 1-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "c5b7d0683bee745deb2c22d15542fe9904afb20c",
+  "prompts": {},
+  "sessions": {
+    "s_3a3dad266bc2e8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "84108a93-5aa7-4291-bc32-d16b79bdbfc1",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Adam Yung <adyung@paloaltonetworks.com>"
+    }
+  }
+}
