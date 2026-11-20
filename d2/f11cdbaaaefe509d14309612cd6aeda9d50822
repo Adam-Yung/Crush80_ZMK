@@ -1,0 +1,19 @@
+.github/workflows/build.yml
+  s_081df738a43bde::t_8765b7354ee998 80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "d2f11cdbaaaefe509d14309612cd6aeda9d50822",
+  "prompts": {},
+  "sessions": {
+    "s_081df738a43bde": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1a7976f5-f76d-4888-a304-d82b2c845b83",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Adam Yung <adyung@paloaltonetworks.com>"
+    }
+  }
+}
