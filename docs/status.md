@@ -1,6 +1,6 @@
 # Status
 
-**Last updated:** 2026-11-20, branch `rgb-and-safe-install`. Board connected. Slot 0 runs the CI RGB image `871f08b9` (confirmed). Slot 1 holds the CI plain image `75a4c62b`. The known-good `f0c178a1` is on disk in `releases/` only.
+**Last updated:** 2026-11-20 (overnight), branch `rgb-and-safe-install`. The board runs the confirmed single-colour RGB image `871f08b9` in slot 0; slot 1 holds the private colour-per-layer image `a53ab70c` (a trial that reverted, see `incidents/2026-11-20-trial-reverted-on-capslock-f5.md`). The known-good `f0c178a1` is on disk in `releases/` only. **Nothing from the overnight build below has been flashed.**
 
 ## Works (on the board, before this branch)
 
@@ -41,3 +41,12 @@ CI now builds `keymaps/personal.keymap` (the owner's keymap with the password ma
 - **Keymap ported** from `kanata-macos.kbd` and **moved out of this public repo** into the private `Adam-Yung/keybindings` (see `decisions/keymap-private.md`, `guides/keymap.md`). Built there by this repo's reusable workflow. Verified on the board: layers, home-row mods, colours. Layers Base, Native, Fn, Nav, ExtNav, Sym, Desk, DeskMove; F5/F6 backlight brightness, Pause backlight toggle.
 - **Layer / modifier colours:** `zmk/src/layer_rgb.c` (`docs/code/zmk/src/layer_rgb.c.md`), verified on the board. **Not yet verified:** Base layer backlight off (`layer-on`), added after the test.
 - Known issue to revisit: the old ExtNav (Space in Nav) layer misbehaved on the board.
+
+## 2026-11-20 overnight: OS layers, per-key RGB, battery (built in CI, NOT flashed, NOT run on the board)
+Verified: CI compiles both images with the private keymap (firmware `9f97bdf`, run 44729894315, hashes checked, `./crush80 check` OK, RGB image 297,006 bytes); the build fails if the RGB config silently drops (it did once: `LED_STRIP` was no longer selected). 35 host tests and the gate pass. The firmware layout was checked against `kanata-macos.kbd` and `kanata-windows.kbd` position by position (884 of 914 identical, the rest deliberate).
+Not verified (needs the board, `guides/hardware-test-plan.md` T8): everything about behaviour.
+- **macOS + Windows**: 13 layers, marker layer + conditional layers, `&os_win` / `&os_mac` with a saved choice (`decisions/os-layers.md`, `code/zmk/src/crush80_os.c.md`).
+- **Per-key backlight engine** (`code/zmk/src/rgb/engine.c.md`): side bar = layer colour, keys coloured by what they do, dark when unbound, Base dark, held mod lights only itself, idle off, Bluetooth off unless toggled. LED order from upstream's stock-firmware table, re-keyed by matrix position and tested.
+- **Battery** (`features/battery.md`): idle/Bluetooth backlight policy; **deep-sleep wake pins corrected** to this board's matrix (`code/zmk/src/poweroff.c.md`), untested.
+- **Home-row-mod hand split corrected** (the position lists were shifted one key in several rows): the mods will feel different, probably better.
+- `./crush80` host bug (CBOR) fixed earlier; `build.sh` now checks the final configuration for RGB builds.

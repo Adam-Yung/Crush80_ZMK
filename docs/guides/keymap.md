@@ -13,10 +13,11 @@ Reasoning: `decisions/keymap-private.md`.
 
 ## Change the keymap
 
-1. Edit `~/.config/DOTFILES/keybindings/crush80-zmk/crush80.keymap`.
-   - Every layer needs exactly 86 bindings (the matrix, 16 + 17 + 17 + 13 + 13 + 10 per row group). A layer with the wrong count fails the build.
-   - Backlight colours are in the `layer_rgb` node at the bottom (see `features/rgb.md`).
-   - Text macros (such as the one on ExtNav + 1) are typed text; keep them in this private file only.
+1. The keymap is **generated**: edit `~/.config/DOTFILES/keybindings/crush80-zmk/tools/gen_keymap.py` (layers, colours, overrides), run `python3 crush80-zmk/tools/gen_keymap.py`, then `python3 crush80-zmk/tools/gen_docs.py` (redraws `Keymap.md` and stops if the firmware layout drifts from the Kanata configs). Editing `crush80.keymap` by hand also works, but the next generator run overwrites it.
+   - Every layer needs exactly 86 bindings (the matrix, 16 + 17 + 17 + 13 + 13 + 10 per row group). The generator asserts it.
+   - There are 13 layers (macOS and Windows copies); the highest active layer wins, so each Windows layer must sit directly above its macOS layer (`decisions/os-layers.md`).
+   - Backlight colours are in the `rgb_scheme` node the generator writes at the bottom (`features/rgb.md`). A keymap with that node builds the per-key engine; without it the RGB build falls back to ZMK underglow.
+   - Text macros (such as the one on ExtNav + 1) are typed text; they stay in this private file only; the generator keeps the existing one.
 2. Commit and push **in the keybindings repo** (`git -C ~/.config/DOTFILES/keybindings commit ...; git push`). The push starts the build in GitHub Actions.
 3. When the run is green, fetch it (below) and flash it with `./crush80 update`.
 

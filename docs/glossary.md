@@ -19,3 +19,10 @@
 | **KNLT / TLNK** | Telink boot marker in a firmware image header (`KNLT` as bytes at offset 0x20). |
 | **PSPI** | The B91's peripheral SPI, used as a WS2812 pulse generator on PB7. |
 | **Reboot Pro** | The RGB variant of the Crush 80 the RGB driver targets. |
+
+## Added 2026-11-20
+- **Marker layer (Win):** a layer with no bindings of its own that only signals "Windows is on"; conditional layers use it to swap in the Windows copies.
+- **Conditional layer:** a ZMK feature that turns a layer on automatically when a set of other layers is active.
+- **rgb-scheme:** the keymap node (`crush80,rgb-scheme`) that holds backlight colours per layer, per key group and per modifier.
+- **Key group:** the kind of action a key performs (arrow, line jump, delete, ...); the backlight colours keys by group.
+- **Frame budget:** the hard limit on the sum of all colour channels in one backlight frame.

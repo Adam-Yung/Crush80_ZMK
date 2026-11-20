@@ -58,3 +58,19 @@ Prerequisite: T2 and T3 pass. First read `features/rgb.md`, "Which board is this
 
 Only with an SWS probe on hand. `./crush80 stock-restore firmware.bin` (dry run, expect "Staged image verified byte for byte"), then `./crush80 backup`, then `--commit`, then `bash install_zmk.sh` to return.
 Record the elapsed time between the commit and stock enumerating.
+
+## T8. Per-key backlight and OS layers (the 2026-11-20 build)
+
+Image: the private build from the keybindings repo (`guides/keymap.md`). Keep your hands off the keyboard during the upload, and test **in order**; stop at the first failure (a failure means unplug and replug: an unconfirmed trial reverts).
+
+1. Boot as a trial. Base: **no light at all**. Type normally for a minute. `./crush80 status` answers.
+2. Hold **Caps** (Nav): side bar and logo blue, `i j k l` green, `e` orange, `r` amber, `u o` red, `z x c v` yellow, `g , .` magenta, only those and the modifiers lit. Release: all dark. If a colour appears on the **wrong key**, the LED map is off for that key: write down which, and stop (`code/zmk/src/rgb/engine.c.md`).
+3. Hold **Space on top of Nav** (ExtNav): `i k` violet, `j l` azure, others as listed in `Keymap.md`. Hold **Tab** (Desk), the left **Shift** key or `'` (Sym), **Fn**: colours as in `Keymap.md`.
+4. Hold **A** (Ctrl, home-row mod) for half a second: **only the A key** lights, red. Tap A: nothing lights. Same for S, D, F, J, K, L, `;`.
+5. F5 / F6 change brightness while a layer is held; Pause and Fn+Backspace switch the backlight off and on (on Base, with Nav held, the side bar must follow).
+6. **Fn+W**: Windows. Hold Caps: the side bar is a **paler** blue; `e` types Home, `z` Ctrl+Z. **Fn+M**: back to macOS. Do **not** reboot yet (a reboot reverts a trial).
+7. Stop typing for ~60 s: the backlight goes off by itself; the next key brings it back.
+8. Bad-day checks: tap Caps ten times quickly; hold Caps for 15 s; press F5 with Caps held (the trigger of the 2026-11-20 trial reset: `incidents/2026-11-20-trial-reverted-on-capslock-f5.md`). If USB drops, write down exactly what you did.
+9. Only after all of that: confirm (`./crush80 confirm`). **Then** test what a trial cannot show: choose Windows, wait 5 s, unplug and replug: still Windows? Brightness remembered? Backlight on/off remembered on USB?
+10. On battery (confirmed image): Bluetooth output has the backlight **off**; Fn+Backspace turns it on; deep sleep (5 min idle) and a wake by a key from every part of the board (the wake pins changed, `code/zmk/src/poweroff.c.md`).
+Record each result in `status.md`.

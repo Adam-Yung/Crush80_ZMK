@@ -5,7 +5,7 @@ Custom ZMK firmware for the Wobkey Crush 80 mechanical keyboard (Telink TLSR9518
 ## Features
 
 - Full ZMK support: USB HID, Bluetooth 5.0, MCUboot DFU
-- [RGB build for the Crush 80 Reboot Pro](docs/features/rgb.md): per-layer and per-modifier backlight colours, verified on the board
+- [RGB build for the Crush 80 Reboot Pro](docs/features/rgb.md): per-key backlight that follows the layer and what each key does (built in CI; board verification in progress), macOS and Windows layer sets (Fn+W / Fn+M)
 - **Safe updates:** every new firmware boots as a trial and reverts on a power cycle until you confirm it (`./crush80 update`)
 - MCUmgr firmware updates over USB serial (no special hardware needed)
 - Built in CI (GitHub Actions), downloaded with verified hashes, flashed only through `./crush80`
