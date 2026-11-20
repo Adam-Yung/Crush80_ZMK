@@ -29,11 +29,13 @@ bash build.sh --skip-bridge --rgb                      # dist/crush80-zmk-app-rg
 `--rgb` adds `conf/rgb.conf` (`CONFIG_CRUSH80_RGB=y`, underglow on, brightness capped at 25 %) and `conf/rgb.overlay` (the `telink,b91-spi-led-strip` node and `zmk,underglow`). The plain build has no RGB code in it.
 Keys with the supplied stock keymap: **Fn+Backspace** toggle, **Fn+Backslash** next effect (solid, breathing, spectrum, swirl), **Fn+Up / Fn+Down** brightness. Turning RGB off cuts LED power.
 
-## Backlight colours (layer and modifier)
+## Backlight scheme: per-key engine (2026-11-20, compiled, not yet run on the board)
 
-`zmk/src/layer_rgb.c` (`code/zmk/src/layer_rgb.c.md`) sets the underglow colour from a `layer_rgb` node in the keymap: one hue and saturation per layer (highest active layer wins), `layer-on = 0` to switch the backlight off on a layer (the personal keymap uses this for the Base layer: LED power is cut), and one colour per held modifier (Ctrl, Shift, Alt, Gui).
-Verified on the board 2026-11-20: colours follow layers and home-row mods. The backlight-off-on-Base option was added afterwards and is not yet verified. Stock and example keymaps have no such node, so the feature is simply absent there.
-Keys in the personal keymap: F5 / F6 dimmer / brighter, Pause on / off (and the Fn combos above).
+With a `crush80,rgb-scheme` node in the keymap, `build.sh --rgb` builds the per-key engine (`code/zmk/src/rgb/engine.c.md`) instead of ZMK's single-colour underglow:
+the **side bar and logo** show the layer colour (paler on Windows), **keys light by what they do** on the active layer (arrows, line jump, word jump, page, delete, clipboard, ...; keys that do nothing stay dark), **Base is dark**, and **a held home-row mod lights only its own key**.
+It goes off when idle and, on Bluetooth, is off unless you toggle it with Fn+Backspace (not saved). Keys: F5 / F6 dimmer / brighter, Pause or Fn+Backspace on/off, Fn+Up / Fn+Down brighter / dimmer. Effects (breathe, spectrum, swirl) are gone.
+Colours, groups and overrides are edited in the keymap (private repo), drawn in its `Keymap.md`. Without the node, the build falls back to ZMK underglow (the earlier behaviour: one colour, effects).
+The earlier one-colour-per-layer module (`zmk/src/layer_rgb.c`) stays in the tree, off, until the engine is proven on the board; then it is deleted (`decisions/rgb.md`).
 
 ## How the driver works (`zmk/drivers/led_strip/led_strip_b91_spi.c`)
 
