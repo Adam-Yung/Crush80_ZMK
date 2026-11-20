@@ -1,6 +1,6 @@
 # RGB on the Crush 80 Reboot Pro
 
-**Status: applied from a reviewed patch, not compiled in this tree and not run on the board.** Nothing here is verified until `guides/hardware-test-plan.md` T6 passes. See `status.md`.
+**Status: the driver, build and basic controls are verified on the board (2026-11-20, Reboot Pro, 154 LEDs lit). Layer and modifier colours (`code/zmk/src/layer_rgb.c.md`) are not built or run yet.**
 
 ## Hardware model the driver assumes
 

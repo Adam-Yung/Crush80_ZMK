@@ -1,0 +1,23 @@
+description: Per-layer and per-modifier backlight colour for the Crush 80 RGB build
+
+compatible: "crush80,layer-rgb"
+
+include: base.yaml
+
+properties:
+  layer-hues:
+    type: array
+    required: true
+    description: Hue (0-359) for each keymap layer, in layer index order. The highest active layer wins.
+  layer-sats:
+    type: array
+    required: true
+    description: Saturation (0-100) for each layer, same order as layer-hues.
+  mod-hues:
+    type: array
+    required: true
+    description: Hue for a held modifier, in the order Ctrl, Shift, Alt, Gui (left and right share a colour). A held modifier overrides the layer colour.
+  mod-sats:
+    type: array
+    required: true
+    description: Saturation for a held modifier, same order as mod-hues.

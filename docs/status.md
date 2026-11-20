@@ -1,6 +1,6 @@
 # Status
 
-**Last updated:** 2026-11-19, branch `rgb-and-safe-install` (uncommitted). The board is not connected; nothing below has run on hardware.
+**Last updated:** 2026-11-20, branch `rgb-and-safe-install`. Board connected. Slot 0 runs the CI RGB image `871f08b9` (confirmed). Slot 1 holds the CI plain image `75a4c62b`. The known-good `f0c178a1` is on disk in `releases/` only.
 
 ## Works (on the board, before this branch)
 
@@ -33,3 +33,11 @@ Suspected cause: `hal_telink` was unpinned. Now pinned to 4226c7fc (the commit t
 ## 2026-11-20: what the first CI trial image taught us
 The first CI image booted (keyboard typed) but never showed a USB serial port. It was built from `keymaps/stock.keymap` and a trimmed `conf/app.conf`, not the owner's personal config that built the known-good image.
 CI now builds `keymaps/personal.keymap` (the owner's keymap with the password macro replaced by a placeholder; the real one stays in `~/.config/DOTFILES`, which local `build.sh` prefers) and `conf/app.conf` is back to the proven LOG/console lines. `hal_telink` pin did not change the image. Still unverified on hardware.
+
+## 2026-11-20: RGB works, install path proven, keymap ported (not yet built)
+- **Proven on the board:** CI-built plain image trial-booted and confirmed; CI-built RGB image trial-booted, all 154 LEDs light (keys, side bar, logo), Fn+Backspace / Fn+\\ / Fn+Up / Fn+Down work, typing normal. Brightness is capped at 25 % (`conf/rgb.conf`), dimmer than stock.
+- **Upload stalls** seen earlier were not reproduced with `mcumgr` called directly (about 80 s for 289 KB). Cause unknown; upstream (Ritwick Verma's fork) carries USB transfer-slot fixes (Zephyr patches 0004-0013) that may explain it. Not applied yet.
+- **Host bug fixed:** the SMP reply decoder rejected indefinite-length CBOR, so every `backup` / `recover` / `stock-restore` reply was dropped. Fixed in `c5b7d06`; `./crush80 backup` now works (backup `53d78d52...` taken).
+- **Keymap ported** from `kanata-macos.kbd` (`keymaps/personal.keymap`, generated per layer; macOS shortcuts; layers Base, Native, Fn, Nav, ExtNav, Sym, Desk, DeskMove). **Not compiled or flashed yet.** Adds F5/F6 backlight brightness and Pause backlight toggle.
+- **Layer / modifier colours:** new `zmk/src/layer_rgb.c` (see `docs/code/zmk/src/layer_rgb.c.md`). **Not compiled or flashed yet.**
+- Known issue to revisit: the old ExtNav (Space in Nav) layer misbehaved on the board.

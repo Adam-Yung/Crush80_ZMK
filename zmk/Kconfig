@@ -26,6 +26,14 @@ config FLASH_MGMT
 	  commands. Used to restore original firmware via USB without SWS
 	  hardware.
 
+config CRUSH80_LAYER_RGB
+	bool "Per-layer and per-modifier backlight colour"
+	default y
+	depends on CRUSH80_RGB && ZMK_RGB_UNDERGLOW && DT_HAS_CRUSH80_LAYER_RGB_ENABLED
+	help
+	  Follows the active layer and held modifiers with the backlight colour. Colours come
+	  from the crush80,layer-rgb node in the keymap. Needs the Solid effect.
+
 config CRUSH80_RGB
 	bool "Crush 80 Reboot Pro LED strip"
 	depends on DT_HAS_TELINK_B91_SPI_LED_STRIP_ENABLED && GPIO && LED_STRIP
