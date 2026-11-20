@@ -52,3 +52,9 @@ Not verified (needs the board, `guides/hardware-test-plan.md` T8): everything ab
 - **Battery** (`features/battery.md`): idle/Bluetooth backlight policy; **deep-sleep wake pins corrected** to this board's matrix (`code/zmk/src/poweroff.c.md`), untested.
 - **Home-row-mod hand split corrected** (the position lists were shifted one key in several rows): the mods will feel different, probably better.
 - `./crush80` host bug (CBOR) fixed earlier; `build.sh` now checks the final configuration for RGB builds.
+
+## 2026-11-20 evening: ambient Base, battery gauge, Bluetooth backlight (NOT compiled, NOT run on the board)
+- **Engine** (`code/zmk/src/rgb/engine.c.md`): layer mode 3 = ambient wave while a USB host is connected (Base: cyan-pink, Windows azure-orchid the other way), dark on battery; `&c80rgb_bat` (Fn+Enter, hold) shows the charge on keys 1..0 whatever the on/off; Bluetooth now uses the saved on/off like USB. Colour maths in `zmk/src/rgb/effects.h`, 5 host tests (`scripts/tests/test_rgb_effects.py`).
+- **Private keymap** updated in the keybindings working tree (Fn+Enter, Base mode 3, `ambient-colors*`), not committed; it needs `firmware_ref` bumped to the firmware commit that carries this, or its CI build fails on `&c80rgb_bat`.
+- Not verified: compilation (local west deps still missing; CI compiles it), everything on hardware (T9).
+- Later the same evening: Base and Native fully dark on battery (held mods included); deep sleep no longer fires while a USB host is active (`patches/zmk-src/0006`, applies cleanly on the local workspace); BLE poll stays 2 ms (`features/battery.md`, it is in the key path). Not run on the board.

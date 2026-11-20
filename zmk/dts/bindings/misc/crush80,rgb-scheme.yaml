@@ -8,7 +8,7 @@ properties:
   layer-modes:
     type: array
     required: true
-    description: Per layer index. 0 = dark keys, 1 = light keys by what they do, 2 = ignore this layer (marker layers).
+    description: Per layer index. 0 = dark keys, 1 = light keys by what they do, 2 = ignore this layer (marker layers), 3 = ambient wave over the whole board while a USB host is connected, dark keys otherwise.
   layer-side:
     type: array
     required: true
@@ -25,6 +25,14 @@ properties:
     type: array
     required: true
     description: 0xRRGGBB of a held modifier's own key, in the order Ctrl, Shift, Alt, Gui.
+  ambient-colors:
+    type: array
+    required: false
+    description: Two 0xRRGGBB colours the ambient wave (mode 3) runs between. Default cyan and pink.
+  ambient-colors-win:
+    type: array
+    required: false
+    description: Same, used while the Windows marker layer is active. Default azure and orchid.
   overrides:
     type: array
     required: true

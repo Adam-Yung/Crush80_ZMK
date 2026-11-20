@@ -392,6 +392,11 @@
 			#binding-cells = <0>;
 			action = <2>;
 		};
+		c80rgb_bat: c80rgb_bat {
+			compatible = "crush80,behavior-rgb";
+			#binding-cells = <0>;
+			action = <3>;
+		};
 		os_mac: os_mac {
 			compatible = "crush80,behavior-os";
 			#binding-cells = <0>;

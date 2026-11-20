@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Adam Yung <adyung@paloaltonetworks.com>
+Date: Fri, 20 Nov 2026 14:00:00 +0000
+Subject: [PATCH] zmk: no-VBUS boards stay awake while a USB host is active
+
+With CONFIG_ZMK_USB_NO_VBUS_DETECT, is_usb_power_present() returned false
+unconditionally, so the board deep-slept after the idle-sleep timeout even
+while plugged in. Treat a configured, non-suspended bus as USB power: a
+pulled cable leaves the bus suspended, so battery sleep is unchanged.
+---
+diff --git a/app/src/activity.c b/app/src/activity.c
+index 2e1a14e..331c165 100644
+--- a/app/src/activity.c
++++ b/app/src/activity.c
+@@ -31,7 +31,12 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
+ #endif
+ 
+ bool is_usb_power_present(void) {
+-#if IS_ENABLED(CONFIG_USB_DEVICE_STACK) && !IS_ENABLED(CONFIG_ZMK_USB_NO_VBUS_DETECT)
++#if IS_ENABLED(CONFIG_USB_DEVICE_STACK) && IS_ENABLED(CONFIG_ZMK_USB_NO_VBUS_DETECT)
++    // No VBUS pin: a pulled cable leaves the bus in SUSPEND, so only a configured,
++    // non-suspended bus proves a host (and its power) is there. A sleeping host
++    // also suspends the bus and lets the board sleep, as on battery.
++    return zmk_usb_is_hid_ready() && zmk_usb_get_status() != USB_DC_SUSPEND;
++#elif IS_ENABLED(CONFIG_USB_DEVICE_STACK)
+     return zmk_usb_is_powered();
+ #else
+     return false;
+-- 
+2.54.0

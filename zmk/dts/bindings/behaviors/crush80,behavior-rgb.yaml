@@ -1,4 +1,4 @@
-description: Crush 80 backlight control (action 0 = on/off, 1 = brighter, 2 = dimmer)
+description: Crush 80 backlight control (action 0 = on/off, 1 = brighter, 2 = dimmer, 3 = battery gauge while held)
 
 compatible: "crush80,behavior-rgb"
 

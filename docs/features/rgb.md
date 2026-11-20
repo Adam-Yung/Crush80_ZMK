@@ -32,8 +32,8 @@ Keys with the supplied stock keymap: **Fn+Backspace** toggle, **Fn+Backslash** n
 ## Backlight scheme: per-key engine (2026-11-20, compiled, not yet run on the board)
 
 With a `crush80,rgb-scheme` node in the keymap, `build.sh --rgb` builds the per-key engine (`code/zmk/src/rgb/engine.c.md`) instead of ZMK's single-colour underglow:
-the **side bar and logo** show the layer colour (paler on Windows), **keys light by what they do** on the active layer (arrows, line jump, word jump, page, delete, clipboard, ...; keys that do nothing stay dark), **Base is dark**, and **a held home-row mod lights only its own key**.
-It goes off when idle and, on Bluetooth, is off unless you toggle it with Fn+Backspace (not saved). Keys: F5 / F6 dimmer / brighter, Pause or Fn+Backspace on/off, Fn+Up / Fn+Down brighter / dimmer. Effects (breathe, spectrum, swirl) are gone.
+the **side bar and logo** show the layer colour (paler on Windows), **keys light by what they do** on the active layer (arrows, line jump, word jump, page, delete, clipboard, ...; keys that do nothing stay dark), **Base is dark on battery and shows a slow cyan-pink wave with a USB host (azure-orchid on Windows)**, and **a held home-row mod lights only its own key**.
+It goes off when idle; the saved on/off applies on USB and Bluetooth alike. Hold Fn+Enter for the battery level on keys 1..0 (shown even with the backlight off). Keys: F5 / F6 dimmer / brighter, Pause or Fn+Backspace on/off, Fn+Up / Fn+Down brighter / dimmer. Effects (breathe, spectrum, swirl) are gone.
 Colours, groups and overrides are edited in the keymap (private repo), drawn in its `Keymap.md`. Without the node, the build falls back to ZMK underglow (the earlier behaviour: one colour, effects).
 The earlier one-colour-per-layer module (`layer_rgb.c`) was deleted once the engine was proven on the board (2026-11-20; `decisions/rgb.md`).
 

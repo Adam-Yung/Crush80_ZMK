@@ -22,6 +22,10 @@ static int on_pressed(struct zmk_behavior_binding *binding, struct zmk_behavior_
 }
 
 static int on_released(struct zmk_behavior_binding *binding, struct zmk_behavior_binding_event event) {
+    const struct device *dev = zmk_behavior_get_binding(binding->behavior_dev);
+    const struct c80_beh_cfg *cfg = dev->config;
+
+    c80_rgb_release(cfg->action);
     return ZMK_BEHAVIOR_OPAQUE;
 }
 

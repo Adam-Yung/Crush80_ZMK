@@ -3,6 +3,7 @@
 In order. Strike nothing; delete a line when it is done and move the fact to `status.md`.
 
 **Needs the owner at the board** (image `ed774974` is confirmed; `guides/hardware-test-plan.md` T8)
+0. T9 (`guides/hardware-test-plan.md`): ambient Base on USB, Fn+Enter battery gauge, Bluetooth backlight following the USB on/off. Needs a CI build of the private keymap at the new firmware commit first (bump `firmware_ref`).
 1. Replug check: OS choice (Fn+W / Fn+M) and backlight on/off survive a replug; idle turns the backlight off and a keypress brings it back.
 2. Caps+F5: try it once on the current image. If the USB drop-off does not recur, retire `incidents/2026-11-20-trial-reverted-on-capslock-f5.md`.
 3. Deep-sleep wake from every key group (the pin audit in `poweroff.c` has never run on hardware).

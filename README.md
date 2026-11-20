@@ -145,6 +145,13 @@ docs/                   Documentation (map: docs/README.md)
 dist/                   Built firmware artifacts (gitignored)
 ```
 
+## Acknowledgements
+
+- **Ritwick Verma** ([RitwickVerma/Crush80_ZMK](https://github.com/RitwickVerma/Crush80_ZMK), Apache-2.0): the key-to-LED order of the per-key backlight, read from the stock firmware's table, and the idea of colouring keys from the live keymap; also the kernel tick-rate fix in `conf/app.conf` (PR #2).
+- **scholzri** (Rainy 75 ZMK, Apache-2.0): the WS2812 driver that fork builds on.
+
+Details and licence text for the RGB engine: `zmk/src/rgb/NOTICE`.
+
 ## Technical Notes
 
 - MCU: Telink TLSR9518 (B91 RISC-V), 48 MHz, 128KB ILM + 128KB DLM, 1MB flash

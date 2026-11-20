@@ -72,5 +72,18 @@ Image: the private build from the keybindings repo (`guides/keymap.md`). Keep yo
 7. Stop typing for ~60 s: the backlight goes off by itself; the next key brings it back.
 8. Bad-day checks: tap Caps ten times quickly; hold Caps for 15 s; press F5 with Caps held (the trigger of the 2026-11-20 trial reset: `incidents/2026-11-20-trial-reverted-on-capslock-f5.md`). If USB drops, write down exactly what you did.
 9. Only after all of that: confirm (`./crush80 confirm`). **Then** test what a trial cannot show: choose Windows, wait 5 s, unplug and replug: still Windows? Brightness remembered? Backlight on/off remembered on USB?
-10. On battery (confirmed image): Bluetooth output has the backlight **off**; Fn+Backspace turns it on; deep sleep (5 min idle) and a wake by a key from every part of the board (the wake pins changed, `code/zmk/src/poweroff.c.md`).
+10. On battery (confirmed image): the backlight follows the saved on/off as on USB (changed after this build, T9); deep sleep (5 min idle) and a wake by a key from every part of the board (the wake pins changed, `code/zmk/src/poweroff.c.md`).
 Record each result in `status.md`.
+
+## T9. Ambient Base, battery gauge, Bluetooth backlight (2026-11-20 evening build)
+
+Same image route as T8. Stop at the first failure.
+
+1. Plugged in, macOS, backlight on: Base shows a slow cyan-pink wave running left to right over keys, side bar and logo. Typing and held home-row mods still work and light as in T8.
+2. Pause (or Fn+Backspace): all dark; again: the wave returns. F5 / F6 dim and brighten it.
+3. Fn+W: the wave turns azure-orchid and runs the other way, tilted. Fn+M: back. Hold Caps: Nav colours, no wave; release: wave.
+4. Hold **Fn+Enter**: only keys 1.. light, red to green, one per 10 %. Release: back to the wave. Repeat with the backlight off: the gauge still shows. Write the number of keys and the host's battery percentage in `status.md`.
+5. Stop typing for 60 s: dark. A key brings the wave back.
+6. Confirm, then unplug (battery, Bluetooth): Base dark within a few seconds. Hold A on Base: nothing lights (Base and Native are fully dark on battery). ScrLk (Native): still dark. Hold Caps: Nav colours (the backlight now follows the same on/off as USB). Hold Fn+Enter: the gauge. If nothing lights on battery even with Caps held, the LED rail may be unpowered on battery: write that down.
+7. Unplug and look at Base for a minute: if the wave keeps running on battery, write down how long (`code/zmk/src/rgb/engine.c.md`, ambient).
+8. Plugged in, leave the board untouched for 6 min: it must not deep-sleep (`./crush80 status` still answers; a key works at once). On battery the same wait must end in deep sleep (`patches/zmk-src/0006`).

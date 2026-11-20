@@ -7,11 +7,17 @@
 #define C80_RGB_TOGGLE 0
 #define C80_RGB_BRIGHTER 1
 #define C80_RGB_DIMMER 2
+#define C80_RGB_BATTERY 3 /* battery gauge while held */
 
 #if IS_ENABLED(CONFIG_CRUSH80_RGB_ENGINE)
 int c80_rgb_action(int action);
+int c80_rgb_release(int action);
 #else
 static inline int c80_rgb_action(int action) {
+    (void)action;
+    return 0;
+}
+static inline int c80_rgb_release(int action) {
     (void)action;
     return 0;
 }

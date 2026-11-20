@@ -2,15 +2,19 @@
 /*
  * Per-key backlight engine for the Crush 80 (154 WS2812: 92 under the keys, 62 side bar and logo).
  *
- * Event driven, no periodic tick: a frame is built when the layer, held modifiers, pressed keys,
- * activity or output changes, and only sent when it differs from the last one. Every LED black means
+ * Event driven: a frame is built when the layer, held modifiers, pressed keys, activity, USB state or
+ * battery level changes, and only sent when it differs from the last one. The only periodic tick is the
+ * ambient animation, which runs only while it is visible (USB host connected). Every LED black means
  * the strip driver cuts the LED supply (PC2), which is where the battery saving is.
  *
  *   - Side bar and logo: the colour of the highest active layer.
  *   - Keys: coloured by what the key does on the active layers (group colours, optional per-key
- *     overrides); keys bound to nothing stay dark. A layer can also be set to "dark".
+ *     overrides); keys bound to nothing stay dark. A layer can also be set to "dark", or to "ambient":
+ *     a slow two-colour wave over the whole board while a USB host is connected. On battery, layers
+ *     that do not light their keys (Base, Native) are fully dark.
  *   - A held home-row mod (or modifier key) lights only its own key, in the modifier's colour.
- *   - Idle: everything off. Bluetooth output: off unless toggled on (not saved).
+ *   - Battery gauge (&c80rgb_bat held): number row 1..0 shows the charge, whatever the other state.
+ *   - Idle or toggled off: everything off. USB and Bluetooth share the saved on/off and brightness.
  *
  * The LED order comes from led_map_data.h (see NOTICE). Colours and layers come from the
  * crush80,rgb-scheme node in the keymap. Needs CONFIG_ZMK_RGB_UNDERGLOW=n (one owner of the strip).
@@ -28,11 +32,11 @@
 #include <zephyr/sys/atomic.h>
 
 #include <zmk/activity.h>
+#include <zmk/battery.h>
 #include <zmk/behavior.h>
-#include <zmk/endpoints.h>
 #include <zmk/event_manager.h>
 #include <zmk/events/activity_state_changed.h>
-#include <zmk/events/endpoint_changed.h>
+#include <zmk/events/battery_state_changed.h>
 #include <zmk/events/layer_state_changed.h>
 #include <zmk/events/keycode_state_changed.h>
 #include <zmk/events/position_state_changed.h>
@@ -41,9 +45,13 @@
 #include <zmk/keymap.h>
 #include <zmk/keys.h>
 #include <zmk/matrix.h>
+#if IS_ENABLED(CONFIG_ZMK_USB)
+#include <zmk/usb.h>
+#endif
 
 #include <dt-bindings/zmk/modifiers.h>
 
+#include "effects.h"
 #include "engine.h"
 #include "led_map_data.h"
 
@@ -66,6 +74,16 @@ static const uint32_t layer_side_win[] = DT_INST_PROP(0, layer_side_win);
 static const uint32_t group_color[] = DT_INST_PROP(0, group_colors);
 static const uint32_t mod_color[] = DT_INST_PROP(0, mod_colors);
 static const uint32_t overrides[] = DT_INST_PROP(0, overrides);
+#if DT_INST_NODE_HAS_PROP(0, ambient_colors)
+static const uint32_t ambient_mac[] = DT_INST_PROP(0, ambient_colors);
+#else
+static const uint32_t ambient_mac[] = {0x00D8FF, 0xFF2A8C};
+#endif
+#if DT_INST_NODE_HAS_PROP(0, ambient_colors_win)
+static const uint32_t ambient_win[] = DT_INST_PROP(0, ambient_colors_win);
+#else
+static const uint32_t ambient_win[] = {0x2080FF, 0xE040FF};
+#endif
 #define POS_RC_ENTRY(i, _) DT_PROP_BY_IDX(TRANSFORM_NODE, map, i)
 static const uint32_t pos_rc[] = {LISTIFY(NPOS, POS_RC_ENTRY, (, ))};
 
@@ -75,25 +93,36 @@ BUILD_ASSERT(ARRAY_SIZE(layer_side_win) == NLAYERS, "layer-side-win needs one en
 BUILD_ASSERT(ARRAY_SIZE(group_color) == G_COUNT, "group-colors needs 18 entries");
 BUILD_ASSERT(ARRAY_SIZE(mod_color) == 4, "mod-colors needs 4 entries");
 BUILD_ASSERT(ARRAY_SIZE(overrides) % 3 == 0, "overrides are triples");
+BUILD_ASSERT(ARRAY_SIZE(ambient_mac) == 2 && ARRAY_SIZE(ambient_win) == 2, "ambient colours are pairs");
 BUILD_ASSERT(NPOS == ZMK_KEYMAP_LEN, "matrix transform length");
 
 #define WIN_LAYER DT_PROP(DT_COMPAT_GET_ANY_STATUS_OKAY(crush80_os_config), win_layer)
 
+#define MODE_DARK 0
+#define MODE_KEYS 1
+#define MODE_MARKER 2
+#define MODE_AMBIENT 3
+
 #define BRT_LEVELS 10
+#define AMBIENT_FRAME_MS 40
+#define GAUGE_MAX_S 10 /* a lost release must not keep the gauge lit on battery */
 #define STRIP_NODE DT_CHOSEN(zmk_underglow)
 
 static const struct device *strip = DEVICE_DT_GET(STRIP_NODE);
 
 static uint8_t pos_led[NPOS];
 static uint8_t pos_extra[NPOS][2];
+static uint8_t led_x[C80_TOTAL_LEDS], led_y[C80_TOTAL_LEDS]; /* 0..255, for the ambient wave */
+static bool led_used[C80_TOTAL_LEDS];                         /* false for key LEDs with no key */
+static uint8_t gauge_pos[C80_GAUGE_KEYS];                     /* positions of keys 1..0 */
 
 static struct {
-    uint8_t enabled; /* USB output: backlight on */
+    uint8_t enabled; /* backlight on */
     uint8_t level;   /* 1..BRT_LEVELS, of CONFIG_CRUSH80_RGB_BRT_MAX percent */
 } st = {1, BRT_LEVELS};
 
-static bool ble_on;      /* on while on Bluetooth: not saved */
 static bool idle;
+static volatile bool gauge; /* battery gauge key held; set by the behaviour, read by the work queue */
 static ATOMIC_DEFINE(pressed, NPOS);
 
 static struct led_rgb px[C80_TOTAL_LEDS];
@@ -220,31 +249,75 @@ static void put_key(uint8_t pos, uint32_t rgb) {
     }
 }
 
-static bool output_allows(void) {
-    if (idle) {
-        return false;
-    }
-    return zmk_endpoint_get_selected().transport == ZMK_TRANSPORT_USB ? st.enabled : ble_on;
+/* A host has configured the board and the bus is not suspended. Without VBUS sensing this is the only
+ * sign of the cable: a pulled cable leaves the bus in SUSPEND (and still "HID ready"), as does a sleeping
+ * host; both count as unplugged. */
+static bool plugged_in(void) {
+#if IS_ENABLED(CONFIG_ZMK_USB)
+    return zmk_usb_is_hid_ready() && zmk_usb_get_status() != USB_DC_SUSPEND;
+#else
+    return false;
+#endif
 }
 
-static void build_frame(void) {
+static void draw_gauge(void) {
+#if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
+    uint8_t soc = zmk_battery_state_of_charge();
+#else
+    uint8_t soc = 0;
+#endif
+    int n = c80_gauge_keys(soc);
+
+    for (int i = 0; i < n; i++) {
+        if (gauge_pos[i] < NPOS) {
+            put_key(gauge_pos[i], c80_gauge_color(i));
+        }
+    }
+}
+
+static void draw_ambient(bool win) {
+    const uint32_t *c = win ? ambient_win : ambient_mac;
+    uint32_t now = k_uptime_get_32();
+
+    for (int led = 0; led < C80_TOTAL_LEDS; led++) {
+        if (led_used[led]) {
+            put(led, c80_mix(c[0], c[1], c80_wave(c80_ambient_phase(now, led_x[led], led_y[led], win))));
+        }
+    }
+}
+
+/* Builds the frame; returns true when it animates and needs another one soon. */
+static bool build_frame(void) {
     memset(px, 0, sizeof(px));
-    if (!output_allows()) {
-        return;
+    if (gauge) {
+        draw_gauge();
+        return false;
+    }
+    if (idle || !st.enabled) {
+        return false;
     }
 
     /* highest active layer that is not a marker layer */
     int top = 0;
     for (int l = NLAYERS - 1; l >= 0; l--) {
-        if (layer_mode[l] != 2 && zmk_keymap_layer_active(zmk_keymap_layer_index_to_id(l))) {
+        if (layer_mode[l] != MODE_MARKER && zmk_keymap_layer_active(zmk_keymap_layer_index_to_id(l))) {
             top = l;
             break;
         }
     }
     bool win = WIN_LAYER < NLAYERS && zmk_keymap_layer_active(zmk_keymap_layer_index_to_id(WIN_LAYER));
-    uint32_t side = win ? layer_side_win[top] : layer_side[top];
-    for (int led = C80_KEY_LEDS; led < C80_TOTAL_LEDS; led++) {
-        put(led, side);
+    bool usb = plugged_in();
+    if (!usb && layer_mode[top] != MODE_KEYS) {
+        return false; /* on battery, Base and Native stay fully dark, held mods included */
+    }
+    bool ambient = layer_mode[top] == MODE_AMBIENT && usb;
+    if (ambient) {
+        draw_ambient(win);
+    } else {
+        uint32_t side = win ? layer_side_win[top] : layer_side[top];
+        for (int led = C80_KEY_LEDS; led < C80_TOTAL_LEDS; led++) {
+            put(led, side);
+        }
     }
 
     uint8_t held = zmk_hid_get_explicit_mods();
@@ -268,7 +341,7 @@ static void build_frame(void) {
             }
         }
 
-        if (layer_mode[top] != 1) {
+        if (layer_mode[top] != MODE_KEYS) {
             continue;
         }
         int g = classify(b);
@@ -283,15 +356,16 @@ static void build_frame(void) {
         }
         put_key(pos, color);
     }
+    return ambient;
 }
 
-static void scale_frame(void) {
+static void scale_frame(uint8_t level) {
     uint32_t sum = 0;
 
     for (int i = 0; i < C80_TOTAL_LEDS; i++) {
-        px[i].r = (px[i].r * st.level * CONFIG_CRUSH80_RGB_BRT_MAX) / (BRT_LEVELS * 100);
-        px[i].g = (px[i].g * st.level * CONFIG_CRUSH80_RGB_BRT_MAX) / (BRT_LEVELS * 100);
-        px[i].b = (px[i].b * st.level * CONFIG_CRUSH80_RGB_BRT_MAX) / (BRT_LEVELS * 100);
+        px[i].r = (px[i].r * level * CONFIG_CRUSH80_RGB_BRT_MAX) / (BRT_LEVELS * 100);
+        px[i].g = (px[i].g * level * CONFIG_CRUSH80_RGB_BRT_MAX) / (BRT_LEVELS * 100);
+        px[i].b = (px[i].b * level * CONFIG_CRUSH80_RGB_BRT_MAX) / (BRT_LEVELS * 100);
         sum += px[i].r + px[i].g + px[i].b;
     }
     /* hard current budget: never exceed it whatever the colours and brightness */
@@ -308,8 +382,11 @@ static void render_handler(struct k_work *work) {
     if (fails >= 10) {
         return; /* strip keeps failing: stay dark until reboot */
     }
-    build_frame();
-    scale_frame();
+    bool animating = build_frame();
+    scale_frame(gauge ? BRT_LEVELS : st.level); /* the gauge stays readable at the lowest brightness */
+    if (animating) {
+        k_work_reschedule_for_queue(&wq, &render_work, K_MSEC(AMBIENT_FRAME_MS));
+    }
     if (last_valid && memcmp(px, last, sizeof(px)) == 0) {
         return;
     }
@@ -326,6 +403,14 @@ static void render_handler(struct k_work *work) {
     memcpy(last, px, sizeof(px));
     last_valid = true;
 }
+
+/* ---------- battery gauge ---------- */
+
+static void gauge_timeout(struct k_work *work) {
+    gauge = false;
+    request_render();
+}
+static K_WORK_DELAYABLE_DEFINE(gauge_work, gauge_timeout);
 
 /* ---------- saved state ---------- */
 
@@ -364,12 +449,8 @@ static void save_soon(void) {
 int c80_rgb_action(int action) {
     switch (action) {
     case C80_RGB_TOGGLE:
-        if (zmk_endpoint_get_selected().transport == ZMK_TRANSPORT_USB) {
-            st.enabled = !st.enabled;
-            save_soon();
-        } else {
-            ble_on = !ble_on; /* on battery: temporary, never saved */
-        }
+        st.enabled = !st.enabled;
+        save_soon();
         break;
     case C80_RGB_BRIGHTER:
         if (st.level < BRT_LEVELS) st.level++;
@@ -379,10 +460,25 @@ int c80_rgb_action(int action) {
         if (st.level > 1) st.level--;
         save_soon();
         break;
+    case C80_RGB_BATTERY:
+        gauge = true;
+        if (ready) {
+            k_work_reschedule_for_queue(&wq, &gauge_work, K_SECONDS(GAUGE_MAX_S));
+        }
+        break;
     default:
         return -EINVAL;
     }
     request_render();
+    return 0;
+}
+
+int c80_rgb_release(int action) {
+    if (action == C80_RGB_BATTERY) {
+        gauge = false;
+        k_work_cancel_delayable(&gauge_work);
+        request_render();
+    }
     return 0;
 }
 
@@ -414,25 +510,46 @@ ZMK_SUBSCRIPTION(c80rgb, zmk_position_state_changed);
  * to its hold, or a plain modifier key) shows up as a keycode event. */
 ZMK_SUBSCRIPTION(c80rgb, zmk_keycode_state_changed);
 ZMK_SUBSCRIPTION(c80rgb, zmk_activity_state_changed);
-ZMK_SUBSCRIPTION(c80rgb, zmk_endpoint_changed);
 ZMK_SUBSCRIPTION(c80rgb, zmk_usb_conn_state_changed);
+#if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
+ZMK_SUBSCRIPTION(c80rgb, zmk_battery_state_changed);
+#endif
 
 static void boot_handler(struct k_work *work) {
     request_render();
 }
 static K_WORK_DELAYABLE_DEFINE(boot_work, boot_handler);
 
+static void place_led(uint8_t led, uint8_t r, uint8_t c) {
+    if (led < C80_KEY_LEDS) {
+        led_used[led] = true;
+        led_x[led] = c * 17; /* matrix column approximates the key's x: 16 columns over 0..255 */
+        led_y[led] = r * 51;
+    }
+}
+
 static int c80rgb_init(void) {
+    memset(gauge_pos, 0xFF, sizeof(gauge_pos));
     for (int p = 0; p < NPOS; p++) {
         uint8_t r = pos_rc[p] >> 8, c = pos_rc[p] & 0xFF;
         pos_led[p] = (r < 6 && c < 16) ? c80_rc_to_led[r][c] : C80_LED_NONE;
         pos_extra[p][0] = pos_extra[p][1] = C80_LED_NONE;
+        place_led(pos_led[p], r, c);
         int n = 0;
         for (size_t i = 0; i < ARRAY_SIZE(c80_extra_leds); i++) {
             if (c80_extra_leds[i][0] == r && c80_extra_leds[i][1] == c && n < 2) {
                 pos_extra[p][n++] = c80_extra_leds[i][2];
+                place_led(c80_extra_leds[i][2], r, c);
             }
         }
+        if (r == 1 && c >= 1 && c <= C80_GAUGE_KEYS) { /* number row: column 1 is the 1 key */
+            gauge_pos[c - 1] = p;
+        }
+    }
+    /* side bar and logo: their geometry is unmapped (todo.md), so spread the wave by LED index */
+    for (int led = C80_KEY_LEDS; led < C80_TOTAL_LEDS; led++) {
+        led_used[led] = true;
+        led_x[led] = (led - C80_KEY_LEDS) * 255 / (C80_TOTAL_LEDS - 1 - C80_KEY_LEDS);
     }
     if (!device_is_ready(strip)) {
         LOG_ERR("LED strip not ready");
