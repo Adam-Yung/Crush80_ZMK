@@ -20,7 +20,11 @@ step "doc links"
 run python3 -I scripts/gate/check-doc-links.py
 
 step "known-good images"
-run ./crush80 golden
+if grep -qv -e '^#' -e '^[[:space:]]*$' releases/MANIFEST.sha256 2>/dev/null; then
+    run ./crush80 golden
+else
+    echo "WARNING: releases/MANIFEST.sha256 lists no known-good image yet (the old one was removed with the password scrub); update and recover refuse to run until one is added"
+fi
 
 step "kconfig/dts sanity (greps, not a compile)"
 if grep -rn "aw20216s\|AW20216S" zmk conf --include=* -l 2>/dev/null | grep -q .; then

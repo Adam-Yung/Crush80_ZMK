@@ -1,3 +1,4 @@
+import hashlib
 import os
 import shutil
 import tempfile
@@ -55,8 +56,12 @@ class UpdateFlowTest(unittest.TestCase):
         self.tmp = tempfile.mkdtemp()
         self.repo = os.path.join(self.tmp, "repo")
         os.makedirs(os.path.join(self.repo, "releases"))
-        for name in ("Crush80-No-RGB.bin", "MANIFEST.sha256"):
-            shutil.copy(os.path.join(REPO, "releases", name), os.path.join(self.repo, "releases", name))
+        # a synthetic known-good image: the tests must not depend on a real release image being in the repo
+        golden, golden_hash = make_image(b"golden")
+        with open(os.path.join(self.repo, "releases", "Crush80-No-RGB.bin"), "wb") as f:
+            f.write(golden)
+        with open(os.path.join(self.repo, "releases", "MANIFEST.sha256"), "w") as f:
+            f.write(hashlib.sha256(golden).hexdigest() + "  Crush80-No-RGB.bin\n")
         data, self.new_hash = make_image()
         self.image = os.path.join(self.tmp, "new.signed.bin")
         with open(self.image, "wb") as f:
