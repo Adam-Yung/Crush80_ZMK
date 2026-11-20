@@ -1,0 +1,60 @@
+zmk/src/rgb/c80_beh_rgb.c
+  s_3a3dad266bc2e8::t_56f4aa9dd71f88 1-44
+zmk/Kconfig
+  s_3a3dad266bc2e8::t_fe19b75a910a7f 30,32,38-62
+  s_3a3dad266bc2e8::t_ab4944947c8b5b 63
+zmk/src/crush80_os.c
+  s_3a3dad266bc2e8::t_56f4aa9dd71f88 1-77
+conf/rgb-underglow.conf
+  s_3a3dad266bc2e8::t_20b3bc507fc047 1-6
+zmk/dts/bindings/behaviors/crush80,behavior-rgb.yaml
+  s_3a3dad266bc2e8::t_56f4aa9dd71f88 1-10
+zmk/boards/crush80/crush80.dts
+  s_3a3dad266bc2e8::t_20b3bc507fc047 375-416
+zmk/src/rgb/LICENSE
+  s_3a3dad266bc2e8::t_20b3bc507fc047 1-201
+zmk/src/rgb/c80_beh_os.c
+  s_3a3dad266bc2e8::t_56f4aa9dd71f88 1-44
+scripts/rgb/derive_led_map.py
+  s_3a3dad266bc2e8::t_1661ab6dc134dc 1-66
+zmk/src/rgb/led_map_data.h
+  s_3a3dad266bc2e8::t_1661ab6dc134dc 1-28
+build.sh
+  s_3a3dad266bc2e8::t_20b3bc507fc047 98,109,126-133
+conf/rgb-engine.conf
+  s_3a3dad266bc2e8::t_20b3bc507fc047 1-4
+zmk/src/rgb/engine.h
+  s_3a3dad266bc2e8::t_56f4aa9dd71f88 1-21
+conf/rgb.conf
+  s_3a3dad266bc2e8::t_20b3bc507fc047 1
+scripts/tests/test_led_map.py
+  s_3a3dad266bc2e8::t_4fef8753fd0d41 1-37
+zmk/dts/bindings/misc/crush80,rgb-scheme.yaml
+  s_3a3dad266bc2e8::t_56f4aa9dd71f88 1-31
+zmk/dts/bindings/behaviors/crush80,behavior-os.yaml
+  s_3a3dad266bc2e8::t_56f4aa9dd71f88 1-10
+zmk/dts/bindings/misc/crush80,os-config.yaml
+  s_3a3dad266bc2e8::t_56f4aa9dd71f88 1-10
+zmk/CMakeLists.txt
+  s_3a3dad266bc2e8::t_fe19b75a910a7f 30-45
+zmk/src/rgb/NOTICE
+  s_3a3dad266bc2e8::t_20b3bc507fc047 1-11
+zmk/src/rgb/engine.c
+  s_3a3dad266bc2e8::t_fe19b75a910a7f 1-440
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "f922108aca80535a6f77e091cf609f2a69fd95cf",
+  "prompts": {},
+  "sessions": {
+    "s_3a3dad266bc2e8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "84108a93-5aa7-4291-bc32-d16b79bdbfc1",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Adam Yung <adyung@paloaltonetworks.com>"
+    }
+  }
+}
