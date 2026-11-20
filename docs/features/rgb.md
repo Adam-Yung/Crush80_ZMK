@@ -1,6 +1,6 @@
 # RGB on the Crush 80 Reboot Pro
 
-**Status: the driver, build and basic controls are verified on the board (2026-11-20, Reboot Pro, 154 LEDs lit). Layer and modifier colours (`code/zmk/src/layer_rgb.c.md`) are not built or run yet.**
+**Status: the driver, build and basic controls are verified on the board (2026-11-20, Reboot Pro, 154 LEDs lit). Per-key colours (`code/zmk/src/rgb/engine.c.md`) are verified on the board too.**
 
 ## Hardware model the driver assumes
 
@@ -35,7 +35,7 @@ With a `crush80,rgb-scheme` node in the keymap, `build.sh --rgb` builds the per-
 the **side bar and logo** show the layer colour (paler on Windows), **keys light by what they do** on the active layer (arrows, line jump, word jump, page, delete, clipboard, ...; keys that do nothing stay dark), **Base is dark**, and **a held home-row mod lights only its own key**.
 It goes off when idle and, on Bluetooth, is off unless you toggle it with Fn+Backspace (not saved). Keys: F5 / F6 dimmer / brighter, Pause or Fn+Backspace on/off, Fn+Up / Fn+Down brighter / dimmer. Effects (breathe, spectrum, swirl) are gone.
 Colours, groups and overrides are edited in the keymap (private repo), drawn in its `Keymap.md`. Without the node, the build falls back to ZMK underglow (the earlier behaviour: one colour, effects).
-The earlier one-colour-per-layer module (`zmk/src/layer_rgb.c`) stays in the tree, off, until the engine is proven on the board; then it is deleted (`decisions/rgb.md`).
+The earlier one-colour-per-layer module (`layer_rgb.c`) was deleted once the engine was proven on the board (2026-11-20; `decisions/rgb.md`).
 
 ## How the driver works (`zmk/drivers/led_strip/led_strip_b91_spi.c`)
 

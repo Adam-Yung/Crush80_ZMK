@@ -39,7 +39,7 @@ CI now builds `keymaps/personal.keymap` (the owner's keymap with the password ma
 - **Upload stalls** seen earlier were not reproduced with `mcumgr` called directly (about 80 s for 289 KB). Cause unknown; upstream (Ritwick Verma's fork) carries USB transfer-slot fixes (Zephyr patches 0004-0013) that may explain it. Not applied yet.
 - **Host bug fixed:** the SMP reply decoder rejected indefinite-length CBOR, so every `backup` / `recover` / `stock-restore` reply was dropped. Fixed in `c5b7d06`; `./crush80 backup` now works (backup `53d78d52...` taken).
 - **Keymap ported** from `kanata-macos.kbd` and **moved out of this public repo** into the private `Adam-Yung/keybindings` (see `decisions/keymap-private.md`, `guides/keymap.md`). Built there by this repo's reusable workflow. Verified on the board: layers, home-row mods, colours. Layers Base, Native, Fn, Nav, ExtNav, Sym, Desk, DeskMove; F5/F6 backlight brightness, Pause backlight toggle.
-- **Layer / modifier colours:** `zmk/src/layer_rgb.c` (`docs/code/zmk/src/layer_rgb.c.md`), verified on the board. **Not yet verified:** Base layer backlight off (`layer-on`), added after the test.
+- **Per-key backlight:** `zmk/src/rgb/engine.c` (`docs/code/zmk/src/rgb/engine.c.md`), verified on the board 2026-11-20: layer side colours, per-key colours, held home-row mods. The older single-colour `layer_rgb.c` was deleted.
 - Known issue to revisit: the old ExtNav (Space in Nav) layer misbehaved on the board.
 
 ## 2026-11-20 overnight: OS layers, per-key RGB, battery (built in CI, NOT flashed, NOT run on the board)

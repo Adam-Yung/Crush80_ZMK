@@ -43,13 +43,6 @@ zephyr_library_include_directories(
   src
 )
 
-if(CONFIG_CRUSH80_LAYER_RGB)
-  zephyr_library_named(layer_rgb)
-  zephyr_library_sources(src/layer_rgb.c)
-  zephyr_library_include_directories(
-    ${ZEPHYR_BASE}/../zmk-src/app/include
-  )
-endif()
 
 if(CONFIG_FLASH_MGMT)
   zephyr_library_named(flash_mgmt)

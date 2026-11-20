@@ -102,7 +102,7 @@ This repo is public and holds **only generic keymaps**. A personal keymap (and a
 
 ### Backlight colours
 
-With the RGB build and a `layer_rgb` node in the keymap, the backlight follows the active layer and held modifiers (any layer can also be set to off). See [docs/features/rgb.md](docs/features/rgb.md) and `docs/guides/keymap.md`.
+With the RGB build and a `crush80,rgb-scheme` node in the keymap, the side bar shows the layer and each key is coloured by what it does; held home-row mods light only their own key. See [docs/features/rgb.md](docs/features/rgb.md) and `docs/guides/keymap.md`.
 
 ## Environment Variables
 

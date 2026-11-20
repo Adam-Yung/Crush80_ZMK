@@ -26,15 +26,6 @@ config FLASH_MGMT
 	  commands. Used to restore original firmware via USB without SWS
 	  hardware.
 
-config CRUSH80_LAYER_RGB
-	bool "Per-layer and per-modifier backlight colour (single colour, superseded by the per-key engine)"
-	default y
-	depends on !CRUSH80_RGB_ENGINE
-	depends on CRUSH80_RGB && ZMK_RGB_UNDERGLOW && DT_HAS_CRUSH80_LAYER_RGB_ENABLED
-	help
-	  Follows the active layer and held modifiers with the backlight colour. Colours come
-	  from the crush80,layer-rgb node in the keymap. Needs the Solid effect.
-
 config CRUSH80_RGB_ENGINE
 	bool "Per-key backlight engine"
 	default y
