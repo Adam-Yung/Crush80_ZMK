@@ -1,0 +1,58 @@
+docs/README.md
+  s_3a3dad266bc2e8::t_582ff8cb146842 20,22
+docs/guides/build.md
+  s_3a3dad266bc2e8::t_582ff8cb146842 13-18
+docs/guides/keymap.md
+  s_3a3dad266bc2e8::t_582ff8cb146842 1-58
+docs/decisions/rgb.md
+  s_3a3dad266bc2e8::t_582ff8cb146842 17-20
+docs/code/zmk/src/layer_rgb.c.md
+  s_3a3dad266bc2e8::t_582ff8cb146842 7,11
+README.md
+  s_3a3dad266bc2e8::t_d54e53cc0e1722 8-9,11-12,60-62,65-66,68,71-72,84,88-89,91,93,95,97,100,103-106,126-127,135
+zmk/dts/bindings/misc/crush80,layer-rgb.yaml
+  s_3a3dad266bc2e8::t_33709fa91ad0f0 16-19
+zmk/src/layer_rgb.c
+  s_3a3dad266bc2e8::t_33709fa91ad0f0 29,33-35,48-51,53-57,78-80
+docs/guides/install-and-upgrade.md
+  s_3a3dad266bc2e8::t_582ff8cb146842 5-6,41-42
+  s_3a3dad266bc2e8::t_70af01e81f71e8 43
+.github/workflows/build.yml
+  s_3a3dad266bc2e8::t_bab40f71a639b5 10-30,46-47,57-59,72-73,75-91,177
+scripts/ci/fetch-build.sh
+  s_3a3dad266bc2e8::t_bab40f71a639b5 3-5,11-12,16,19,23
+docs/features/rgb.md
+  s_3a3dad266bc2e8::t_d54e53cc0e1722 32-37
+docs/decisions/keymap-private.md
+  s_3a3dad266bc2e8::t_582ff8cb146842 1-11
+.gitignore
+  s_3a3dad266bc2e8::t_bab40f71a639b5 45-47
+docs/decisions/README.md
+  s_3a3dad266bc2e8::t_582ff8cb146842 6
+docs/incidents/2026-11-20-smp-cbor-indefinite.md
+  s_3a3dad266bc2e8::t_582ff8cb146842 1-7
+scripts/gate/verify.sh
+  s_3a3dad266bc2e8::t_7e41393f33b4d6 30-36
+docs/code/scripts/crush80/README.md
+  s_3a3dad266bc2e8::t_582ff8cb146842 18-19
+docs/status.md
+  s_3a3dad266bc2e8::t_d54e53cc0e1722 41-42
+docs/todo.md
+  s_3a3dad266bc2e8::t_d54e53cc0e1722 5-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "08a2ecdb09ea2cb53510f71b60bec70813ed6a98",
+  "prompts": {},
+  "sessions": {
+    "s_3a3dad266bc2e8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "84108a93-5aa7-4291-bc32-d16b79bdbfc1",
+        "model": "unknown"
+      },
+      "human_author": "Adam Yung <adyung@paloaltonetworks.com>"
+    }
+  }
+}
