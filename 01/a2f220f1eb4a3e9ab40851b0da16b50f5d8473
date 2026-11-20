@@ -1,0 +1,25 @@
+docs/code/zmk/src/rgb/engine.c.md
+  s_3a3dad266bc2e8::t_4a07886aabc6a1 10
+scripts/crush80/cli.py
+  s_3a3dad266bc2e8::t_4a07886aabc6a1 11-13
+docs/status.md
+  s_3a3dad266bc2e8::t_4a07886aabc6a1 3
+docs/todo.md
+  s_3a3dad266bc2e8::t_0cc704eb44b792 16-18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "01a2f220f1eb4a3e9ab40851b0da16b50f5d8473",
+  "prompts": {},
+  "sessions": {
+    "s_3a3dad266bc2e8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "84108a93-5aa7-4291-bc32-d16b79bdbfc1",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Adam Yung <adyung@paloaltonetworks.com>"
+    }
+  }
+}
