@@ -59,3 +59,8 @@ so a defect that does hang the firmware is undone by a power cycle (`features/in
 
 `history/rgb-debug-history.md`, `history/rgb-led-full-investigation.md`, `history/rgb-led-plan.md` and `history/ghidra_spi_extraction.md` record the AW20216S attempts. Kept so the same dead ends are not walked again.
 Decision record: `decisions/rgb.md`.
+
+
+## Modifier display
+
+While Ctrl, Shift, Alt or Cmd is held, the whole backlight goes dark except the top row (Esc, F1-F12, PrtSc, ScrLk, Pause), which shows one colour per combination of the four modifiers (15 colours, set in the keymap's `crush80,rgb-scheme` node as `mod-combo-colors`; the keys that form the bar are `mod-bar`). Any held modifier counts, including a physical Shift while typing capitals. Added 2026-11-20.

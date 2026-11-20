@@ -72,7 +72,8 @@ static const uint32_t layer_mode[] = DT_INST_PROP(0, layer_modes);
 static const uint32_t layer_side[] = DT_INST_PROP(0, layer_side);
 static const uint32_t layer_side_win[] = DT_INST_PROP(0, layer_side_win);
 static const uint32_t group_color[] = DT_INST_PROP(0, group_colors);
-static const uint32_t mod_color[] = DT_INST_PROP(0, mod_colors);
+static const uint32_t combo_color[] = DT_INST_PROP(0, mod_combo_colors);
+static const uint32_t mod_bar[] = DT_INST_PROP(0, mod_bar);
 static const uint32_t overrides[] = DT_INST_PROP(0, overrides);
 #if DT_INST_NODE_HAS_PROP(0, ambient_colors)
 static const uint32_t ambient_mac[] = DT_INST_PROP(0, ambient_colors);
@@ -91,7 +92,7 @@ BUILD_ASSERT(ARRAY_SIZE(layer_mode) == NLAYERS, "layer-modes needs one entry per
 BUILD_ASSERT(ARRAY_SIZE(layer_side) == NLAYERS, "layer-side needs one entry per layer");
 BUILD_ASSERT(ARRAY_SIZE(layer_side_win) == NLAYERS, "layer-side-win needs one entry per layer");
 BUILD_ASSERT(ARRAY_SIZE(group_color) == G_COUNT, "group-colors needs 18 entries");
-BUILD_ASSERT(ARRAY_SIZE(mod_color) == 4, "mod-colors needs 4 entries");
+BUILD_ASSERT(ARRAY_SIZE(combo_color) == 15, "mod-combo-colors needs 15 entries (masks 1..15)");
 BUILD_ASSERT(ARRAY_SIZE(overrides) % 3 == 0, "overrides are triples");
 BUILD_ASSERT(ARRAY_SIZE(ambient_mac) == 2 && ARRAY_SIZE(ambient_win) == 2, "ambient colours are pairs");
 BUILD_ASSERT(NPOS == ZMK_KEYMAP_LEN, "matrix transform length");
@@ -288,45 +289,9 @@ static void draw_ambient(bool win) {
 
 /* ---------- held modifiers ---------- */
 
-#define PICK_ALL 0xFF
-
-static const struct zmk_behavior_binding *eff[NPOS]; /* effective binding per position, this frame */
-
-static bool is_hrm(const struct zmk_behavior_binding *b) {
-    return b->behavior_dev && starts(b->behavior_dev, "home_row_mod");
-}
-
-/* Modifier bit (0..7) of a binding whose hold or key is a modifier that is held now, else -1. */
-static int held_mod_bit(const struct zmk_behavior_binding *b, uint8_t held) {
-    uint16_t id = ZMK_HID_USAGE_ID(b->param1);
-
-    if (!b->behavior_dev || id < 0xE0 || id > 0xE7 || !(held & BIT(id - 0xE0))) {
-        return -1;
-    }
-    return id - 0xE0;
-}
-
-/* Home-row mods are recognised by held modifier state because position events do not reliably reach
- * this listener (engine.c.md). Two home-row keys can share a modifier (left and right hand), so for each
- * held modifier the pressed bit picks the one key when it names exactly one; otherwise all of that
- * modifier's home-row keys light. */
-static void pick_home_row_mods(uint8_t held, uint8_t pick[8]) {
-    uint8_t npressed[8] = {0};
-
-    memset(pick, PICK_ALL, 8);
-    for (uint8_t pos = 0; pos < NPOS; pos++) {
-        const struct zmk_behavior_binding *b = eff[pos];
-        int m = b ? held_mod_bit(b, held) : -1;
-        if (m >= 0 && is_hrm(b) && atomic_test_bit(pressed, pos)) {
-            npressed[m]++;
-            pick[m] = pos;
-        }
-    }
-    for (int m = 0; m < 8; m++) {
-        if (npressed[m] != 1) {
-            pick[m] = PICK_ALL;
-        }
-    }
+/* Held Ctrl, Shift, Alt, Gui (left or right) folded into a 4-bit mask: ctrl 1, shift 2, alt 4, gui 8. */
+static uint8_t mod_mask(uint8_t held) {
+    return ((held & 0x11) ? 1 : 0) | ((held & 0x22) ? 2 : 0) | ((held & 0x44) ? 4 : 0) | ((held & 0x88) ? 8 : 0);
 }
 
 /* Builds the frame; returns true when it animates and needs another one soon. */
@@ -353,6 +318,17 @@ static bool build_frame(void) {
     if (!usb && layer_mode[top] != MODE_KEYS) {
         return false; /* on battery, Base and Native stay fully dark, held mods included */
     }
+    /* Modifier display: while any modifier is held everything is dark except the mod bar (top row),
+     * which shows one colour per combination of the four modifiers. */
+    uint8_t mm = mod_mask(zmk_hid_get_explicit_mods());
+    if (mm) {
+        for (size_t i = 0; i < ARRAY_SIZE(mod_bar); i++) {
+            if (mod_bar[i] < NPOS) {
+                put_key(mod_bar[i], combo_color[mm - 1]);
+            }
+        }
+        return false;
+    }
     bool ambient = layer_mode[top] == MODE_AMBIENT && usb;
     if (ambient) {
         draw_ambient(win);
@@ -364,20 +340,8 @@ static bool build_frame(void) {
     }
 
     for (uint8_t pos = 0; pos < NPOS; pos++) {
-        eff[pos] = effective(pos);
-    }
-    uint8_t held = zmk_hid_get_explicit_mods();
-    uint8_t pick[8];
-    pick_home_row_mods(held, pick);
-    for (uint8_t pos = 0; pos < NPOS; pos++) {
-        const struct zmk_behavior_binding *b = eff[pos];
+        const struct zmk_behavior_binding *b = effective(pos);
         if (!b) {
-            continue;
-        }
-
-        int m = held_mod_bit(b, held);
-        if (m >= 0 && (is_hrm(b) ? (pick[m] == PICK_ALL || pick[m] == pos) : atomic_test_bit(pressed, pos))) {
-            put_key(pos, mod_color[m & 3]);
             continue;
         }
 

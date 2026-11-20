@@ -21,10 +21,14 @@ properties:
     type: array
     required: true
     description: 0xRRGGBB per key group, in the order arrow, line, word, page, delete, clip, number, symbol, letter, macro, layer, mod, ctrl, fkey, media, desktop, system, danger.
-  mod-colors:
+  mod-combo-colors:
     type: array
     required: true
-    description: 0xRRGGBB of a held modifier's own key, in the order Ctrl, Shift, Alt, Gui.
+    description: 15 colours, 0xRRGGBB, for each combination of held modifiers, indexed by mask-1 where Ctrl is 1, Shift 2, Alt 4, Gui 8 (left or right alike). While any modifier is held the whole backlight is dark except the mod bar, which shows this colour.
+  mod-bar:
+    type: array
+    required: true
+    description: Matrix positions of the keys that form the mod bar (the top row, positions 0-15 on the Crush 80).
   ambient-colors:
     type: array
     required: false
