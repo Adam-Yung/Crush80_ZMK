@@ -1,0 +1,23 @@
+zmk/src/poweroff.c
+  s_3a3dad266bc2e8::t_481e0bbdc4b2cf 39-40,55,85,101,129,133,135-139,142-145,147-157,159-161,164
+build.sh
+  s_3a3dad266bc2e8::t_8aacf4bd888964 202-211
+conf/rgb-engine.conf
+  s_3a3dad266bc2e8::t_70b802b5b107d3 2-3,5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "79c7ea644032fe9bd9f13aee11060f22919d560c",
+  "prompts": {},
+  "sessions": {
+    "s_3a3dad266bc2e8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "84108a93-5aa7-4291-bc32-d16b79bdbfc1",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Adam Yung <adyung@paloaltonetworks.com>"
+    }
+  }
+}
