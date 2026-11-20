@@ -1,0 +1,39 @@
+docs/code/zmk/src/rgb/engine.c.md
+  s_3a3dad266bc2e8::t_c6a9e340963d60 1-19
+docs/features/rgb.md
+  s_3a3dad266bc2e8::t_c6a9e340963d60 32,34-38
+docs/incidents/2026-11-20-trial-reverted-on-capslock-f5.md
+  s_3a3dad266bc2e8::t_809055479b7be3 1-6
+docs/decisions/os-layers.md
+  s_3a3dad266bc2e8::t_809055479b7be3 1-9
+docs/code/zmk/src/crush80_os.c.md
+  s_3a3dad266bc2e8::t_c6a9e340963d60 1-6
+docs/decisions/README.md
+  s_3a3dad266bc2e8::t_809055479b7be3 6
+conf/diag-power.conf
+  s_3a3dad266bc2e8::t_809055479b7be3 1-5
+docs/code/zmk/src/poweroff.c.md
+  s_3a3dad266bc2e8::t_c6a9e340963d60 1-6
+docs/features/battery.md
+  s_3a3dad266bc2e8::t_809055479b7be3 1-28
+docs/README.md
+  s_3a3dad266bc2e8::t_809055479b7be3 19,22
+zmk/src/rgb/engine.c
+  s_3a3dad266bc2e8::t_178cc4c30b24e2 68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "504ec69a91ad634903b4bc79bf53a1e0829f8b08",
+  "prompts": {},
+  "sessions": {
+    "s_3a3dad266bc2e8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "84108a93-5aa7-4291-bc32-d16b79bdbfc1",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Adam Yung <adyung@paloaltonetworks.com>"
+    }
+  }
+}
