@@ -52,7 +52,8 @@ LOG_MODULE_REGISTER(c80rgb, LOG_LEVEL_INF);
 BUILD_ASSERT(DT_NUM_INST_STATUS_OKAY(DT_DRV_COMPAT) == 1, "need exactly one crush80,rgb-scheme node");
 
 #define NLAYERS ZMK_KEYMAP_LAYERS_LEN
-#define NPOS ZMK_KEYMAP_LEN
+#define TRANSFORM_NODE DT_NODELABEL(default_transform) /* the board has physical layouts, so ZMK gives no node macro */
+#define NPOS DT_PROP_LEN(TRANSFORM_NODE, map)
 
 enum group {
     G_ARROW, G_LINE, G_WORD, G_PAGE, G_DELETE, G_CLIP, G_NUMBER, G_SYMBOL, G_LETTER, G_MACRO,
@@ -65,8 +66,8 @@ static const uint32_t layer_side_win[] = DT_INST_PROP(0, layer_side_win);
 static const uint32_t group_color[] = DT_INST_PROP(0, group_colors);
 static const uint32_t mod_color[] = DT_INST_PROP(0, mod_colors);
 static const uint32_t overrides[] = DT_INST_PROP(0, overrides);
-#define POS_RC_ENTRY(i, _) DT_PROP_BY_IDX(ZMK_KEYMAP_TRANSFORM_NODE, map, i)
-static const uint32_t pos_rc[] = {LISTIFY(ZMK_KEYMAP_LEN, POS_RC_ENTRY, (, ))};
+#define POS_RC_ENTRY(i, _) DT_PROP_BY_IDX(TRANSFORM_NODE, map, i)
+static const uint32_t pos_rc[] = {LISTIFY(NPOS, POS_RC_ENTRY, (, ))};
 
 BUILD_ASSERT(ARRAY_SIZE(layer_mode) == NLAYERS, "layer-modes needs one entry per layer");
 BUILD_ASSERT(ARRAY_SIZE(layer_side) == NLAYERS, "layer-side needs one entry per layer");
@@ -74,7 +75,7 @@ BUILD_ASSERT(ARRAY_SIZE(layer_side_win) == NLAYERS, "layer-side-win needs one en
 BUILD_ASSERT(ARRAY_SIZE(group_color) == G_COUNT, "group-colors needs 18 entries");
 BUILD_ASSERT(ARRAY_SIZE(mod_color) == 4, "mod-colors needs 4 entries");
 BUILD_ASSERT(ARRAY_SIZE(overrides) % 3 == 0, "overrides are triples");
-BUILD_ASSERT(ARRAY_SIZE(pos_rc) == NPOS, "matrix transform length");
+BUILD_ASSERT(NPOS == ZMK_KEYMAP_LEN, "matrix transform length");
 
 #define WIN_LAYER DT_PROP(DT_COMPAT_GET_ANY_STATUS_OKAY(crush80_os_config), win_layer)
 
