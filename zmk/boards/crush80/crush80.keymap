@@ -151,7 +151,7 @@
 
 	macros {
 		/*
-		 * Dummy password: w0rkloveLoveF!!!
+		 * Placeholder text macro
 		 */
 		dummy_pw: dummy_pw {
 			compatible = "zmk,behavior-macro";
