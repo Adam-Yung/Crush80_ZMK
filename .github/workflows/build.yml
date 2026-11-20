@@ -8,6 +8,11 @@ on:
     branches: [main, rgb-and-safe-install]
   pull_request:
   workflow_dispatch:
+    inputs:
+      src_ref:
+        description: "Diagnostic: build the firmware sources (zmk/ conf/ patches/ build.sh keymaps/) from this older commit, with current CI tooling"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -37,6 +42,15 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - name: Overlay older sources (diagnostic runs only)
+        if: inputs.src_ref != ''
+        env:
+          SRC_REF: ${{ inputs.src_ref }}
+        run: |
+          git checkout "$SRC_REF" -- zmk conf patches build.sh keymaps fetch_ble_blob.sh
+          git status --short | head -20
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
@@ -90,21 +104,26 @@ jobs:
           for d in zmk-src zephyr modules/hal/hal_telink bootloader/mcuboot; do
             echo "$d $(git -C "$d" rev-parse HEAD)"
           done
-          test "$(git -C modules/hal/hal_telink rev-parse HEAD)" = 4226c7fc17d5a34e557d026d428fc766191a0800
+          [ -n "${{ inputs.src_ref }}" ] || test "$(git -C modules/hal/hal_telink rev-parse HEAD)" = 4226c7fc17d5a34e557d026d428fc766191a0800
 
       - name: Build plain image
         run: |
           export ZEPHYR_SDK_INSTALL_DIR="$HOME/zephyr-sdk-${SDK_VERSION}"
           bash build.sh --skip-bridge
       - name: Build RGB image
+        if: inputs.src_ref == ''
         run: |
           export ZEPHYR_SDK_INSTALL_DIR="$HOME/zephyr-sdk-${SDK_VERSION}"
           bash build.sh --skip-bridge --rgb
 
       - name: Validate images offline and record hashes
+        env:
+          SRC_REF: ${{ inputs.src_ref }}
         run: |
           mkdir -p out
-          for f in crush80-zmk-app.signed.bin crush80-zmk-app-rgb.signed.bin; do
+          files="crush80-zmk-app.signed.bin"
+          [ -z "$SRC_REF" ] && files="$files crush80-zmk-app-rgb.signed.bin"
+          for f in $files; do
             ./crush80 check "dist/$f"
             cp "dist/$f" out/
           done
