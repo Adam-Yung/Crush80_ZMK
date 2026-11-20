@@ -107,8 +107,12 @@ static struct k_work_q wq;
 static void render_handler(struct k_work *work);
 static K_WORK_DELAYABLE_DEFINE(render_work, render_handler);
 
+static bool ready; /* the work queue exists; events that arrive before that are picked up by the boot render */
+
 static void request_render(void) {
-    k_work_reschedule_for_queue(&wq, &render_work, K_MSEC(5));
+    if (ready) {
+        k_work_reschedule_for_queue(&wq, &render_work, K_MSEC(5));
+    }
 }
 
 /* ---------- what a key does -> group ---------- */
@@ -353,7 +357,9 @@ SETTINGS_STATIC_HANDLER_DEFINE(c80rgb, "c80rgb", NULL, set_cb, NULL, NULL);
 
 static void save_soon(void) {
 #if IS_ENABLED(CONFIG_SETTINGS)
-    k_work_reschedule_for_queue(&wq, &save_work, K_SECONDS(3));
+    if (ready) {
+        k_work_reschedule_for_queue(&wq, &save_work, K_SECONDS(3));
+    }
 #endif
 }
 
@@ -435,6 +441,7 @@ static int c80rgb_init(void) {
     }
     k_work_queue_start(&wq, wq_stack, K_THREAD_STACK_SIZEOF(wq_stack), K_PRIO_PREEMPT(5), NULL);
     k_thread_name_set(&wq.thread, "c80rgb");
+    ready = true;
     /* saved state has loaded by now */
     k_work_schedule_for_queue(&wq, &boot_work, K_SECONDS(2));
     return 0;
