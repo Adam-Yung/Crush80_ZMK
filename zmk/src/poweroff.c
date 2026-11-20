@@ -36,6 +36,8 @@ LOG_MODULE_REGISTER(poweroff_b91, LOG_LEVEL_INF);
 #define ANA_CTRL_CYC    BIT(6)
 #define ANA_CTRL_RW     BIT(5)  /* 1=write, 0=read */
 #define ANA_CTRL_BUSY   BIT(7)
+/* The analog interface answers in microseconds; this bound only keeps a dead bus from hanging the board. */
+#define ANA_SPIN_MAX    100000
 
 /* PM sleep modes and wakeup sources (from SDK pm.h) */
 #define DEEPSLEEP_MODE  0x30
@@ -50,7 +52,7 @@ LOG_MODULE_REGISTER(poweroff_b91, LOG_LEVEL_INF);
 #define GPIO_PD4        (GPIO_GROUPD | BIT(4))
 #define GPIO_PD5        (GPIO_GROUPD | BIT(5))
 #define GPIO_PD6        (GPIO_GROUPD | BIT(6))
-#define GPIO_PE0        (GPIO_GROUPE | BIT(0))
+#define GPIO_PD7        (GPIO_GROUPD | BIT(7))
 
 #define WAKEUP_LEVEL_LOW 0
 
@@ -80,7 +82,7 @@ static uint8_t analog_read(uint8_t addr)
 	sys_write8(addr, ANA_ADDR_REG);
 	sys_write8(1, ANA_LEN_REG);
 	sys_write8(ANA_CTRL_CYC, ANA_CTRL_REG);  /* read: RW bit clear */
-	while (sys_read8(ANA_CTRL_REG) & ANA_CTRL_BUSY) {
+	for (int i = 0; i < ANA_SPIN_MAX && (sys_read8(ANA_CTRL_REG) & ANA_CTRL_BUSY); i++) {
 	}
 	uint8_t val = sys_read8(ANA_DATA_REG);
 
@@ -96,7 +98,7 @@ static void analog_write(uint8_t addr, uint8_t val)
 	sys_write8(val, ANA_DATA_REG);
 	sys_write8(1, ANA_LEN_REG);
 	sys_write8(ANA_CTRL_CYC | ANA_CTRL_RW, ANA_CTRL_REG);
-	while (sys_read8(ANA_CTRL_REG) & ANA_CTRL_BUSY) {
+	for (int i = 0; i < ANA_SPIN_MAX && (sys_read8(ANA_CTRL_REG) & ANA_CTRL_BUSY); i++) {
 	}
 
 	irq_unlock(key);
@@ -124,45 +126,42 @@ void z_sys_poweroff(void)
 	 *
 	 * B91 pull registers: 2 bits per pin, 4 pins per register.
 	 *   reg = 0x0E + (port * 2) + (pin >= 4 ? 1 : 0)
-	 *   pin N → bits [(N&3)*2+1 : (N&3)*2]
+	 *   pin N -> bits [(N&3)*2+1 : (N&3)*2]
 	 *   Values: 0=none, 1=1M pull-up, 2=100K pull-down, 3=10K pull-up
 	 *
 	 * With columns held LOW (100K pull-down) and rows HIGH (1M pull-up),
-	 * a keypress forward-biases the matrix diode → row goes LOW → wakeup.
+	 * a keypress forward-biases the matrix diode -> row goes LOW -> wakeup.
 	 *
-	 * Column pins: PA0-4, PB1-6, PC1, PE4-7
-	 * Row pins:    PE0, PD2-PD6 */
+	 * The pins are the ones in crush80.dts (kscan0), not the Rainy 75's:
+	 * Column pins: PE0-2, PE4-6, PB0-6, PC0, PC1, PC4
+	 * Row pins:    PD7, PD2-PD6
+	 * (Before 2026-11-20 this listed the Rainy 75's pins, so PD7 was never a wake source and
+	 *  several columns were never pulled low. Not yet tested on the board; test after confirming.) */
 #define PULL_DOWN  2  /* 100K pull-down */
 #define PULL_UP    1  /* 1M pull-up */
-	/* 0x0E: PA0-3 all 100K down */
-	analog_write(0x0E, (PULL_DOWN << 0) | (PULL_DOWN << 2) |
-			   (PULL_DOWN << 4) | (PULL_DOWN << 6));
-	/* 0x0F: PA4 100K down, PA5-7 unchanged */
-	analog_write(0x0F, (analog_read(0x0F) & 0xFC) | (PULL_DOWN << 0));
-	/* 0x10: PB0 unchanged, PB1-3 100K down */
-	analog_write(0x10, (analog_read(0x10) & 0x03) |
-			   (PULL_DOWN << 2) | (PULL_DOWN << 4) | (PULL_DOWN << 6));
+#define PD4(n) (PULL_DOWN << (2 * (n)))
+#define PU4(n) (PULL_UP << (2 * (n)))
+	/* 0x10: PB0-3 100K down */
+	analog_write(0x10, PD4(0) | PD4(1) | PD4(2) | PD4(3));
 	/* 0x11: PB4-6 100K down, PB7 unchanged */
-	analog_write(0x11, (analog_read(0x11) & 0xC0) |
-			   (PULL_DOWN << 0) | (PULL_DOWN << 2) | (PULL_DOWN << 4));
-	/* 0x12: PC0 unchanged, PC1 100K down, PC2-3 unchanged */
-	analog_write(0x12, (analog_read(0x12) & 0xF3) | (PULL_DOWN << 2));
-	/* 0x17: PE4-7 all 100K down */
-	analog_write(0x17, (PULL_DOWN << 0) | (PULL_DOWN << 2) |
-			   (PULL_DOWN << 4) | (PULL_DOWN << 6));
+	analog_write(0x11, (analog_read(0x11) & 0xC0) | PD4(0) | PD4(1) | PD4(2));
+	/* 0x12: PC0, PC1 100K down; PC2 (LED power) and PC3 unchanged */
+	analog_write(0x12, (analog_read(0x12) & 0xF0) | PD4(0) | PD4(1));
+	/* 0x13: PC4 100K down; PC5-7 unchanged */
+	analog_write(0x13, (analog_read(0x13) & 0xFC) | PD4(0));
+	/* 0x16: PE0-2 100K down; PE3 unchanged */
+	analog_write(0x16, (analog_read(0x16) & 0xC0) | PD4(0) | PD4(1) | PD4(2));
+	/* 0x17: PE4-6 100K down; PE7 unchanged */
+	analog_write(0x17, (analog_read(0x17) & 0xC0) | PD4(0) | PD4(1) | PD4(2));
 
-	/* Reinforce 1M pull-ups on row pins */
+	/* 1M pull-ups on the row pins */
 	/* 0x14: PD2-3 1M up, PD0-1 unchanged */
-	analog_write(0x14, (analog_read(0x14) & 0x0F) |
-			   (PULL_UP << 4) | (PULL_UP << 6));
-	/* 0x15: PD4-6 1M up, PD7 unchanged */
-	analog_write(0x15, (analog_read(0x15) & 0xC0) |
-			   (PULL_UP << 0) | (PULL_UP << 2) | (PULL_UP << 4));
-	/* 0x16: PE0 1M up, PE1-3 unchanged */
-	analog_write(0x16, (analog_read(0x16) & 0xFC) | (PULL_UP << 0));
+	analog_write(0x14, (analog_read(0x14) & 0x0F) | PU4(2) | PU4(3));
+	/* 0x15: PD4-7 1M up */
+	analog_write(0x15, PU4(0) | PU4(1) | PU4(2) | PU4(3));
 
 	/* Configure row pins as wakeup sources (LOW level = key pressed). */
-	pm_set_gpio_wakeup(GPIO_PE0, WAKEUP_LEVEL_LOW, 1);
+	pm_set_gpio_wakeup(GPIO_PD7, WAKEUP_LEVEL_LOW, 1);
 	pm_set_gpio_wakeup(GPIO_PD2, WAKEUP_LEVEL_LOW, 1);
 	pm_set_gpio_wakeup(GPIO_PD3, WAKEUP_LEVEL_LOW, 1);
 	pm_set_gpio_wakeup(GPIO_PD4, WAKEUP_LEVEL_LOW, 1);

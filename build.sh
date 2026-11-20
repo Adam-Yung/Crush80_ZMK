@@ -199,6 +199,16 @@ west build \
     -DDTS_ROOT="$WORKSPACE_DIR/zmk"
 echo "  ZMK app: OK"
 
+# An RGB build whose backlight code silently dropped out of the configuration must fail, not ship.
+if [ "$ENABLE_RGB" = true ]; then
+    want=CONFIG_CRUSH80_RGB=y
+    [ "${RGB_FLAVOUR:-}" = rgb-engine ] && want=CONFIG_CRUSH80_RGB_ENGINE=y
+    for sym in CONFIG_CRUSH80_RGB=y "$want"; do
+        grep -q "^$sym$" "$APP_BUILD_DIR/zephyr/.config" || { echo "ERROR: $sym is not in the final configuration (a Kconfig dependency dropped it)"; exit 1; }
+    done
+    echo "  RGB configuration check: OK ($want)"
+fi
+
 rm -f "$OVERRIDE_CONF"
 
 # ── Collect artifacts into dist/ ─────────────────────────────────────────────
