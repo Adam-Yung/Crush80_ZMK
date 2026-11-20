@@ -14,6 +14,12 @@
 #define BASE 0
 #define FN   1
 
+#ifdef CRUSH80_RGB_KEYMAP
+#define CRUSH80_RGB_BINDING(action) &rgb_ug action
+#else
+#define CRUSH80_RGB_BINDING(action) &trans
+#endif
+
 / {
 	keymap {
 		compatible = "zmk,keymap";
@@ -64,23 +70,23 @@
 				&out OUT_TOG  &trans        &trans        &trans        &trans
 				&trans        &trans        &trans        &rgb_ug RGB_TOG
 				&bt BT_CLR    &trans        &trans
-				/* Row 2: all trans (17 keys) */
+				/* Row 2: cycle RGB effect with Fn+backslash */
 				&trans        &trans        &trans        &trans        &trans
 				&trans        &trans        &trans        &trans        &trans
-				&trans        &trans        &trans        &trans
+				&trans        &trans        &trans        CRUSH80_RGB_BINDING(RGB_EFF)
 				&trans        &trans        &trans
 				/* Row 3: all trans (13 keys) */
 				&trans        &trans        &trans        &trans        &trans
 				&trans        &trans        &trans        &trans        &trans
 				&trans        &trans                      &trans
-				/* Row 4: all trans (13 keys) */
+				/* Row 4: Fn+Up increases RGB brightness */
 				&trans                      &trans        &trans        &trans
 				&trans        &trans        &trans        &trans        &trans
-				&trans        &trans                      &trans        &trans
-				/* Row 5: all trans (10 keys) */
+				&trans        &trans                      &trans        CRUSH80_RGB_BINDING(RGB_BRI)
+				/* Row 5: Fn+Down decreases RGB brightness */
 				&trans        &trans        &trans                      &trans
 				&trans        &trans        &trans
-				&trans        &trans        &trans
+				&trans        CRUSH80_RGB_BINDING(RGB_BRD) &trans
 			>;
 		};
 	};

@@ -1,0 +1,17 @@
+---
+description: Coding and documentation etiquette for this repo. AGENTS.md at the repo root is the source of truth; this file only points to it.
+alwaysApply: true
+---
+
+# Coding Etiquette
+
+Full rules live in `AGENTS.md`. Read it before writing or editing code or docs. Highlights:
+
+- Never download or install anything yourself; add it to `scripts/owner/install-deps.sh` and wait for the owner.
+- Flashing goes through `./crush80`. New images boot as a trial and the host confirms them. A hash-verified known-good image must exist first.
+- Docs: `docs/features/` (current design), `docs/guides/` (how-to), `docs/code/<mirror>.md` (per-file why), `docs/decisions/` (append-only), `docs/incidents/`.
+- Comments explain why, never what. No AI-slop prose. Extract instead of growing a function that keeps collecting special cases.
+- Every command in a script has a timeout. Every host-side feature has tests; safety invariants get named tests.
+- Commit only when asked, staging explicit paths, after `bash scripts/gate/verify.sh` is green.
+
+Do not duplicate `AGENTS.md` here; update that file instead.

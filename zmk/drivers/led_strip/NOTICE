@@ -1,0 +1,8 @@
+The B91 PSPI/DMA LED strip code derives from the Apache-2.0 WS2812 driver
+by scholzri (Rainy 75 ZMK) and its 154-LED Crush 80 adaptation by Ritwick
+Verma. The upstream version used for this port is:
+
+https://github.com/RitwickVerma/Crush80_ZMK/tree/36ad482/zmk/drivers/led_strip
+https://github.com/scholzri/rainy75-zmk
+
+See LICENSE in this directory for the license for the ported driver.

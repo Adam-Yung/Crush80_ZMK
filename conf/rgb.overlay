@@ -1,0 +1,18 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+
+#include <zephyr/dt-bindings/led/led.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+	chosen {
+		zmk,underglow = &crush80_leds;
+	};
+
+	crush80_leds: led-strip {
+		compatible = "telink,b91-spi-led-strip";
+		/* 92 LEDs under the keys, 62 in the side bar and logo. */
+		chain-length = <154>;
+		color-mapping = <LED_COLOR_ID_GREEN LED_COLOR_ID_RED LED_COLOR_ID_BLUE>;
+		power-gpios = <&gpioc 2 GPIO_ACTIVE_HIGH>;
+	};
+};

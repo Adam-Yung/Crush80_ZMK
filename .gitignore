@@ -40,3 +40,5 @@ firmware/
 
 # MacOS droppings
 .DS_Store
+backups/
+ci-downloads/

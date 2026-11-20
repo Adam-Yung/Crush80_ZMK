@@ -71,6 +71,10 @@ for f in "$BRIDGE_IMAGE" "$ZMK_IMAGE"; do
     [[ -f "$f" ]] || die "Required file not found: $f (run: bash build.sh)"
 done
 
+# Never start the OTA with an image that fails offline validation, or with no known-good image on disk.
+./crush80 check "$ZMK_IMAGE" || die "ZMK image failed validation"
+./crush80 golden || die "known-good release image missing or altered"
+
 MCUMGR="${MCUMGR:-$(command -v mcumgr 2>/dev/null || echo "$HOME/go/bin/mcumgr")}"
 [[ -x "$MCUMGR" ]] || die "mcumgr not found. Install: go install github.com/apache/mynewt-mcumgr-cli/mcumgr@latest"
 
@@ -168,8 +172,8 @@ header "=== Crush 80: Install ZMK ==="
 
 if check_usb "$ZMK_VID" "$ZMK_PID"; then
     info "Keyboard is already running ZMK (or bridge) firmware."
-    info "To update ZMK, use: bash flash.sh stage2"
-    info "To reinstall from scratch, first restore stock: bash restore_stock.sh"
+    info "To update ZMK, use: ./crush80 update"
+    info "To go back to stock firmware: ./crush80 stock-restore (see docs/guides/install-and-upgrade.md)"
     exit 0
 fi
 
@@ -184,7 +188,7 @@ info "  ZMK:    $ZMK_IMAGE ($(stat -c%s "$ZMK_IMAGE" 2>/dev/null || stat -f%z "$
 if [[ $AUTO_YES -eq 0 ]]; then
     echo ""
     info "This will replace the stock firmware with ZMK."
-    info "You can restore the original later with: bash restore_stock.sh"
+    info "You can restore the original later with: ./crush80 stock-restore"
     read -rp "Proceed? [y/N] " confirm
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         info "Aborted."
@@ -222,4 +226,4 @@ ELAPSED=$((SECONDS - START_TIME))
 echo ""
 ok "Installation complete (${ELAPSED}s)"
 info "Keyboard is running ZMK firmware."
-info "To restore stock firmware: bash restore_stock.sh"
+info "To restore stock firmware: ./crush80 stock-restore"

@@ -5,6 +5,7 @@ Custom ZMK firmware for the Wobkey Crush 80 mechanical keyboard (Telink TLSR9518
 ## Features
 
 - Full ZMK support: USB HID, Bluetooth 5.0, MCUboot DFU
+- Optional [RGB build for the Crush 80 Reboot Pro](docs/features/rgb.md)
 - MCUmgr firmware updates over USB serial (no special hardware needed)
 - Stock QWERTY keymap included (ready to flash out of the box)
 - Example advanced keymap with Home Row Mods, Nav/Sym layers, Mac mode
@@ -29,6 +30,9 @@ bash build.sh --skip-bridge --skip-mcuboot
 
 This builds the ZMK firmware using the stock keymap. Output: `dist/crush80-zmk-app.signed.bin`
 
+For the Reboot Pro RGB build, run `bash build.sh --skip-bridge --rgb`.
+Output: `dist/crush80-zmk-app-rgb.signed.bin`. See the [RGB setup and hardware test](docs/features/rgb.md).
+
 ### Pre-built Firmware
 
 If you don't want to build from source, use the pre-built release:
@@ -39,8 +43,7 @@ If you don't want to build from source, use the pre-built release:
 
 Flash a pre-built release:
 ```bash
-CRUSH80_FIRMWARE=releases/Crush80-No-RGB.bin bash update.sh
-# Then unplug/replug
+./crush80 update releases/Crush80-No-RGB.bin
 ```
 
 ### 3. Install ZMK on a stock Crush 80
@@ -51,52 +54,22 @@ If your keyboard is still running the manufacturer firmware:
 bash install_zmk.sh
 ```
 
-This uses the OTA bridge method to replace the stock firmware with ZMK. To revert, use `python3 scripts/flash_mgmt_upload.py` with the stock firmware binary.
+This uses the stock firmware's own OTA protocol to bring in a bridge image, which then installs ZMK. To go back to stock: `./crush80 stock-restore` (see [install and upgrade](docs/guides/install-and-upgrade.md)).
 
 ### 4. Update firmware (keyboard already running ZMK)
 
 ```bash
-bash update.sh --build
+./crush80 backup                                  # once: full flash dump, read-only, ~3 min
+bash build.sh --skip-bridge                       # or add --rgb
+./crush80 update dist/crush80-zmk-app.signed.bin  # same as: bash update.sh --build
 ```
 
-Or if you've already built:
+The new image boots as a **trial**: you unplug and replug, test the keyboard, and only then does the tool confirm it. Until it is confirmed, another unplug and replug restores the previous image,
+even if the new firmware is dead. The bootloader is never rewritten. Full procedure: [docs/guides/install-and-upgrade.md](docs/guides/install-and-upgrade.md).
 
-```bash
-bash update.sh
-```
+## If something goes wrong
 
-After upload completes, **unplug the keyboard USB cable, wait 2 seconds, plug back in**. MCUboot swaps to the new firmware on cold boot.
-
-## Emergency Recovery (Bricked Keyboard)
-
-> **Symptom**: Keyboard stops typing ~2 seconds after plug-in. `mcumgr image upload` stalls or fails. USB device may enumerate but SMP commands timeout.
-
-> **Cause**: Firmware bug where `irq_lock()` + unbounded busy-wait (`while (REG & BIT) {}`) creates a permanent system hang. All interrupts are masked, so USB, BLE, and kscan all die simultaneously.
-
-### Fix: Force MCUboot Serial Recovery
-
-```bash
-# Step 1: With keyboard plugged in (even if hung), run:
-python3 scripts/force_recovery.py
-
-# Step 2: UNPLUG the keyboard, wait 2 seconds, REPLUG
-# MCUboot enters serial recovery mode (no app runs — no hang!)
-
-# Step 3: Upload known-good firmware:
-PORT=$(python3 -c "import glob; p=glob.glob('/dev/cu.usbmodem*') or glob.glob('/dev/ttyACM*'); print(p[0] if p else '')")
-~/go/bin/mcumgr --conntype serial --connstring "dev=$PORT,baud=115200" \
-  image upload dist/crush80-zmk-app.signed.MACMODE-WORKING.bin
-
-# Step 4: Unplug, wait 2 seconds, replug — keyboard boots normally
-```
-
-### How It Works
-
-The firmware includes a custom `flash_mgmt` MCUmgr group (ID 64) that can erase flash sectors. `force_recovery.py` erases the slot 0 image header (address 0x10000, 4096 bytes). MCUboot is configured with `CONFIG_BOOT_SERIAL_NO_APPLICATION=y`, so when it sees no valid app header, it enters permanent serial recovery mode over USB. From there, firmware can be uploaded with no time pressure because no application code is running.
-
-### Why Normal Recovery Doesn't Work
-
-The normal `mcumgr image upload` requires the running app's SMP handler to process each upload chunk. When the system hangs 2 seconds after boot, only a few chunks transfer before the irq_lock deadlock kills everything. The `force_recovery.py` script only needs to send ONE small erase command within that 2-second window — which reliably succeeds.
+Unplug, wait 5 s, replug: an unconfirmed trial reverts. If the board hangs after every boot, `./crush80 recover`. Everything else, down to the SWS last resort: [docs/guides/recovery.md](docs/guides/recovery.md).
 
 ---
 
@@ -138,26 +111,16 @@ bash update.sh
 
 | Script | Purpose |
 |--------|---------|
-| `setup.sh` | One-time environment setup (SDK, west, mcumgr) |
-| `build.sh` | Build ZMK firmware from source |
-| `update.sh` | Flash firmware onto a running ZMK keyboard |
-| `install_zmk.sh` | First-time install from stock manufacturer firmware |
-| `fetch_ble_blob.sh` | Download Telink BLE binary blob |
-| `scripts/force_recovery.py` | **EMERGENCY**: Force MCUboot recovery when system is hung |
-| `scripts/flash_mgmt_upload.py` | Write firmware to flash in 256-byte chunks (for bricked keyboards) |
-| `scripts/flash_ota.py` | Stage 1 OTA flash for initial ZMK install |
-| `scripts/recovery_flash.py` | Recovery flash when SMP is unresponsive |
-| `scripts/emergency_upload.py` | Power-cycle upload for hung firmware |
+| `./crush80` | **The tool.** `check`, `golden`, `status`, `backup`, `update`, `confirm`, `recover`, `stock-restore`. Standard library only; needs `mcumgr`. |
+| `update.sh` | Wrapper: `./crush80 update`, optionally after `build.sh`. |
+| `build.sh` | Build ZMK firmware (`--rgb` for the Reboot Pro RGB build). |
+| `install_zmk.sh` | First install from stock firmware. |
+| `setup.sh`, `fetch_ble_blob.sh`, `scripts/owner/install-deps.sh` | Owner-run setup and downloads. Agents never run these. |
+| `scripts/flash_ota.py` | Stock OTA protocol (used by `install_zmk.sh`). |
+| `scripts/gate/verify.sh` | Pre-commit gate: tests, syntax, doc links, known-good images. |
+| `scripts/legacy/` | Hand-run recovery scripts kept until `./crush80 recover` is proven on hardware. |
 
-## Recovery
-
-If the keyboard stops responding after a bad flash:
-
-1. **Unplug and replug** — MCUboot auto-reverts if the new firmware doesn't confirm within 11 seconds
-2. **Force MCUboot recovery** — `python3 scripts/force_recovery.py` (erases slot 0 header, forces MCUboot serial recovery on next boot)
-3. **nRF Connect Device Manager** — Install on phone, connect via BLE, tap "Reset to firmware loader mode"
-4. **Recovery flash** — `python3 scripts/recovery_flash.py` (unplug, run script, replug when prompted)
-5. **Restore stock** — `python3 scripts/flash_mgmt_upload.py firmware/Wobkey_Crush_80_Patched_Firmware/firmware/v2_patched.bin`
+Rules for contributors and agents: [AGENTS.md](AGENTS.md). Docs map: [docs/README.md](docs/README.md).
 
 ## Project Structure
 
@@ -168,9 +131,10 @@ zmk/                    ZMK module (board def, drivers, DTS, source)
   boards/crush80/       Board definition (DTS, defconfig, matrix)
   drivers/              Platform drivers (USB, BLE, battery, watchdog, LED)
   src/                  Application source (boot_diag, flash_mgmt, etc.)
-scripts/                Flashing and diagnostic tools
+crush80                 Install/upgrade/recovery tool (wrapper); code in scripts/crush80/
+scripts/                Tool package, tests, gate, owner-run installs, legacy recovery scripts
 patches/                Zephyr and ZMK patches for B91 platform
-docs/                   Technical documentation
+docs/                   Documentation (map: docs/README.md)
 dist/                   Built firmware artifacts (gitignored)
 ```
 
@@ -180,6 +144,7 @@ dist/                   Built firmware artifacts (gitignored)
 - Matrix: 6 rows x 16 columns, col2row diode direction, 88 keys
 - Flash layout: MCUboot (0x0-0x10000), App (0x10000-0x80000), Slot1 (0x80000-0xF0000)
 - BLE: Telink proprietary blob (`liblt_9518_zephyr.a`)
-- MCUboot swap requires **physical USB unplug/replug** (cold boot) — software reset alone does NOT trigger swap
+- MCUboot swap and revert require a **physical USB unplug/replug** (cold boot) — software reset alone does NOT trigger a swap
 - NEVER set `CONFIG_LOG_DEFAULT_LEVEL=4` (floods serial, bricks SMP)
-- HSPI is disabled — PE0/PE1/PE2 are shared between matrix columns and LED SPI
+- The Reboot Pro RGB strip uses PB7 (PSPI MOSI) and PC2 (LED power); PE0/PE1/PE2 remain matrix columns
+- The [factory 2.4 GHz USB receiver](docs/features/receiver.md) requires the stock Wobkey radio protocol

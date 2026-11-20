@@ -93,7 +93,8 @@ static inline void _flash_mgmt_irq_disable(void)
  * XIP flash — all called functions are also in .ram_code. After this
  * function starts, the flash can be freely erased.
  *
- * Flow: disable IRQs -> erase 0x0..erase_end -> copy staging -> reset
+ * Flow: disable IRQs -> erase 0x0..erase_end -> copy staging -> clean up the
+ * rest of 0x0..0x80000 -> reset
  * ----------------------------------------------------------------------- */
 
 /* Parameters passed via global (in DLM/SRAM, survives flash erase) */
@@ -138,8 +139,11 @@ static void flash_restore_trampoline(void)
 
 	trampoline_marker(0x11); /* entering Phase 1 */
 
-	/* Phase 1: Erase 0x0 to staging start (preserves staging data) */
-	for (uint32_t pos = 0; pos < stg; pos += FLASH_SECTOR_SIZE) {
+	/* Phase 1: Erase only what the new image will occupy. Every sector erased
+	 * here before the copy finishes is time with no bootable image; the
+	 * rest is cleaned in phase 3, when a valid image is already in place. */
+	uint32_t erase_end = (fw_len + (FLASH_SECTOR_SIZE - 1)) & ~(FLASH_SECTOR_SIZE - 1);
+	for (uint32_t pos = 0; pos < erase_end; pos += FLASH_SECTOR_SIZE) {
 		flash_erase_sector_ram(pos);
 	}
 
@@ -164,12 +168,13 @@ static void flash_restore_trampoline(void)
 
 	trampoline_marker(0x44); /* Phase 2 complete */
 
-	/* Phase 3: Erase staging through 0x80000 to clean up:
-	 *   - The staging copy (no longer needed)
+	/* Phase 3: Erase the rest of 0x0..0x80000 to clean up:
+	 *   - Remnants of the previous image
+	 *   - The staging copy, when it sits below 0x80000
 	 *   - OTA secondary bank remnants (0x40000-0x7FFFF)
 	 * The stock firmware's dual-bank boot checks 0x40000 for a TLNK
 	 * header; leftover data there prevents boot. */
-	for (uint32_t pos = stg; pos < 0x80000; pos += FLASH_SECTOR_SIZE) {
+	for (uint32_t pos = erase_end; pos < 0x80000; pos += FLASH_SECTOR_SIZE) {
 		flash_erase_sector_ram(pos);
 	}
 

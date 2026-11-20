@@ -6,11 +6,13 @@
 # Outputs go to dist/ (gitignored):
 #   dist/crush80-ota-bridge.bin    ← flash first via flash_ota.py
 #   dist/crush80-zmk-app.signed.bin ← flash second via mcumgr
+#   dist/crush80-zmk-app-rgb.signed.bin ← optional Reboot Pro RGB app
 #   dist/crush80-mcuboot.bin       ← only needed for SWS/hardware recovery
 #
 # Options:
 #   bash build.sh --skip-bridge    skip OTA bridge build (faster rebuild)
 #   bash build.sh --skip-mcuboot   skip MCUboot build
+#   bash build.sh --rgb            build the Reboot Pro RGB app
 
 set -euo pipefail
 
@@ -18,12 +20,14 @@ REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 SKIP_BRIDGE=false
 SKIP_MCUBOOT=true   # MCUboot: built separately or use pre-built copy
                     # Build explicitly with: bash build.sh --build-mcuboot
+ENABLE_RGB=false
 
 for arg in "$@"; do
     case $arg in
         --skip-bridge)    SKIP_BRIDGE=true ;;
         --skip-mcuboot)   SKIP_MCUBOOT=true ;;
         --build-mcuboot)  SKIP_MCUBOOT=false ;;
+        --rgb)            ENABLE_RGB=true ;;
     esac
 done
 
@@ -33,21 +37,22 @@ done
 #   2. Dotfiles directory (~/.config/DOTFILES/keybindings/crush80-zmk/)
 #   3. Repo default (keymaps/stock.keymap)
 DOTFILES_ZMK="${CRUSH80_ZMK_CONFIG:-$HOME/.config/DOTFILES/keybindings/crush80-zmk}"
+KEYMAP=
 
 if [ -n "${CRUSH80_KEYMAP:-}" ] && [ -f "$CRUSH80_KEYMAP" ]; then
     echo "Using keymap from CRUSH80_KEYMAP: $CRUSH80_KEYMAP"
-    cp "$CRUSH80_KEYMAP" "$REPO_DIR/zmk/boards/crush80/crush80.keymap"
+    KEYMAP=$CRUSH80_KEYMAP
     # If CRUSH80_APP_CONF is also set, use that
     if [ -n "${CRUSH80_APP_CONF:-}" ] && [ -f "$CRUSH80_APP_CONF" ]; then
         cp "$CRUSH80_APP_CONF" "$REPO_DIR/conf/app.conf"
     fi
 elif [ -d "$DOTFILES_ZMK" ]; then
     echo "Syncing config from $DOTFILES_ZMK..."
-    [ -f "$DOTFILES_ZMK/crush80.keymap" ] && cp "$DOTFILES_ZMK/crush80.keymap" "$REPO_DIR/zmk/boards/crush80/crush80.keymap"
+    [ -f "$DOTFILES_ZMK/crush80.keymap" ] && KEYMAP="$DOTFILES_ZMK/crush80.keymap"
     [ -f "$DOTFILES_ZMK/app.conf" ] && cp "$DOTFILES_ZMK/app.conf" "$REPO_DIR/conf/app.conf"
 elif [ -f "$REPO_DIR/keymaps/stock.keymap" ]; then
     echo "No custom keymap configured — using keymaps/stock.keymap"
-    cp "$REPO_DIR/keymaps/stock.keymap" "$REPO_DIR/zmk/boards/crush80/crush80.keymap"
+    KEYMAP="$REPO_DIR/keymaps/stock.keymap"
 fi
 
 # ── Locate west workspace ────────────────────────────────────────────────────
@@ -61,12 +66,16 @@ else
     exit 1
 fi
 
-export PATH="$HOME/miniforge3/bin:$HOME/.local/bin:$HOME/go/bin:/usr/local/bin:/usr/bin:$PATH"
-# West may be installed in Python user site
-WEST_USER_BIN="$(python3 -m site --user-base 2>/dev/null)/bin"
-[[ -d "$WEST_USER_BIN" ]] && export PATH="$WEST_USER_BIN:$PATH"
+[ -d "$REPO_DIR/.venv/bin" ] && export PATH="$REPO_DIR/.venv/bin:$PATH"
+export PATH="$PATH:$HOME/miniforge3/bin:$HOME/.local/bin:$HOME/go/bin:/usr/local/bin:/usr/bin"
+# West may be installed in the Python user site outside a virtual environment.
+if ! command -v west >/dev/null; then
+    WEST_USER_BIN="$(python3 -c 'import site; print(site.getuserbase())')/bin"
+    export PATH="$PATH:$WEST_USER_BIN"
+fi
 
-export ZEPHYR_SDK_INSTALL_DIR="$HOME/zephyr-sdk-0.17.0"
+export ZEPHYR_SDK_INSTALL_DIR="${ZEPHYR_SDK_INSTALL_DIR:-$HOME/zephyr-sdk-0.17.0}"
+export ZEPHYR_TOOLCHAIN_VARIANT="${ZEPHYR_TOOLCHAIN_VARIANT:-zephyr}"
 
 echo "Workspace: $WORKSPACE_DIR"
 echo "Repo:      $REPO_DIR"
@@ -75,17 +84,18 @@ echo "Repo:      $REPO_DIR"
 echo ""
 echo "Syncing board files..."
 cp -r "$REPO_DIR/zmk/boards/crush80/"* "$WORKSPACE_DIR/zmk/boards/crush80/"
-cp -r "$REPO_DIR/zmk/drivers/led/"*    "$WORKSPACE_DIR/zmk/drivers/led/"
-cp -r "$REPO_DIR/zmk/dts/bindings/led/"* "$WORKSPACE_DIR/zmk/dts/bindings/led/"
+if [ -n "$KEYMAP" ]; then
+    cp "$KEYMAP" "$WORKSPACE_DIR/zmk/boards/crush80/crush80.keymap"
+fi
 
-# Sync platform drivers (usb, bluetooth, sensor, watchdog)
-for d in usb bluetooth sensor watchdog; do
+# Sync platform drivers
+for d in usb bluetooth sensor watchdog led_strip; do
     mkdir -p "$WORKSPACE_DIR/zmk/drivers/$d"
     cp -r "$REPO_DIR/zmk/drivers/$d/"* "$WORKSPACE_DIR/zmk/drivers/$d/"
 done
 
 # Sync DTS bindings for platform drivers
-for d in usb bluetooth sensor watchdog; do
+for d in usb bluetooth sensor watchdog led-strip; do
     mkdir -p "$WORKSPACE_DIR/zmk/dts/bindings/$d"
     cp -r "$REPO_DIR/zmk/dts/bindings/$d/"* "$WORKSPACE_DIR/zmk/dts/bindings/$d/"
 done
@@ -108,6 +118,17 @@ cd "$WORKSPACE_DIR"
 
 CONF="$REPO_DIR/conf/app.conf"
 OVERLAY="$WORKSPACE_DIR/conf/mcumgr.overlay"
+APP_BUILD_DIR=build-crush80
+APP_NAME=crush80-zmk-app
+APP_OVERLAYS=$OVERLAY
+RGB_CPPFLAGS=
+if [ "$ENABLE_RGB" = true ]; then
+    CONF="$CONF;$WORKSPACE_DIR/conf/rgb.conf"
+    APP_OVERLAYS="$OVERLAY;$WORKSPACE_DIR/conf/rgb.overlay"
+    APP_BUILD_DIR=build-crush80-rgb
+    APP_NAME=crush80-zmk-app-rgb
+    RGB_CPPFLAGS=-DCRUSH80_RGB_KEYMAP
+fi
 
 # Crush 80 specific overrides:
 #   app.conf already sets CONFIG_ZMK_KEYBOARD_NAME but this override
@@ -161,11 +182,12 @@ echo "[3/3] Building ZMK application..."
 west build \
     -s zmk-src/app \
     -b crush80 \
-    -d build-crush80 \
+    -d "$APP_BUILD_DIR" \
     --pristine \
     -- \
     -DEXTRA_CONF_FILE="$CONF;$OVERRIDE_CONF" \
-    -DDTC_OVERLAY_FILE="$OVERLAY" \
+    -DDTC_OVERLAY_FILE="$APP_OVERLAYS" \
+    -DDTS_EXTRA_CPPFLAGS="$RGB_CPPFLAGS" \
     -DBOARD_ROOT="$WORKSPACE_DIR/zmk" \
     -DDTS_ROOT="$WORKSPACE_DIR/zmk"
 echo "  ZMK app: OK"
@@ -180,8 +202,8 @@ mkdir -p "$DIST"
 
 [ "$SKIP_BRIDGE"   = false ] && \
     cp "build-bridge/zephyr/zmk.bin"         "$DIST/crush80-ota-bridge.bin"
-cp     "build-crush80/zephyr/zmk.signed.bin" "$DIST/crush80-zmk-app.signed.bin"
-cp     "build-crush80/zephyr/zmk.bin"        "$DIST/crush80-zmk-app.bin"
+cp "$APP_BUILD_DIR/zephyr/zmk.signed.bin" "$DIST/$APP_NAME.signed.bin"
+cp "$APP_BUILD_DIR/zephyr/zmk.bin" "$DIST/$APP_NAME.bin"
 if [ "$SKIP_MCUBOOT" = false ]; then
     cp "build-mcuboot/zephyr/zephyr.bin" "$DIST/crush80-mcuboot.bin"
 elif [ -f "build-mcuboot/zephyr/zephyr.bin" ]; then
@@ -196,8 +218,11 @@ echo ""
 echo "=============================================="
 echo "  Build complete!"
 echo ""
-echo "  dist/crush80-ota-bridge.bin      ← flash first"
-echo "  dist/crush80-zmk-app.signed.bin  ← flash second"
-echo ""
-echo "  Next: bash flash.sh"
+if [ "$SKIP_BRIDGE" = false ]; then
+    echo "  dist/crush80-ota-bridge.bin"
+fi
+if [ "$SKIP_MCUBOOT" = false ]; then
+    echo "  dist/crush80-mcuboot.bin"
+fi
+echo "  dist/$APP_NAME.signed.bin"
 echo "=============================================="

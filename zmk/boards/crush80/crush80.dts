@@ -4,9 +4,7 @@
 #include <telink/telink_b91.dtsi>
 #include <zephyr/dt-bindings/gpio/gpio.h>
 #include <dt-bindings/zmk/matrix_transform.h>
-#include <dt-bindings/led/led.h>
 #include <physical_layouts.dtsi>
-#include <zephyr/dt-bindings/pinctrl/b91-pinctrl.h>
 
 /*
  * Wobkey Crush 80 — DTS board definition
@@ -14,23 +12,8 @@
  * MCU: Telink TLSR9511 (B91, RISC-V)
  *   CONFIRMED: USB descriptor string at firmware offset 0x1DB20 reads "TLSR9511"
  *
- * LED driver: AW20216S (SPI-connected LED matrix controller)
- *   CONFIRMED: 0xFD 0x00 AW20216S page-select command found at 3 locations in firmware
- *   NOTE: zmk,underglow is intentionally NOT set here. A separate AW20216S driver
- *   must be written (zmk/drivers/led/aw20216s.c) before RGB works.
- *
- * Matrix: 6 active rows x 16 cols (physical scan)
- *   CONFIRMED: v2_update.md states "Same 16x6 scan routine, same pin assignments"
- *
- * GPIO assignments:
- *   LIKELY CORRECT: v2_update.md explicitly states "same pin assignments" as the
- *   Rainy 75 Pro, which has been hardware-validated. These are directly copied from
- *   the Rainy 75 Pro DTS (scholzri/rainy75-zmk). Validate at bring-up by pressing
- *   known keys and checking ZMK matrix debug log.
- *
- * AW20216S SPI pins:
- *   UNKNOWN: Not yet extracted. Requires Ghidra analysis of LED init at ~0xEF88
- *   or SPI peripheral register trace. Added as a TODO node with placeholder pins.
+ * Matrix: 6 active rows x 16 cols (physical scan).
+ * RGB-equipped Reboot Pro boards use the optional conf/rgb.overlay.
  */
 
 / {
@@ -51,9 +34,6 @@
 		zmk,battery = &battery;
 		zmk,kscan = &kscan0;
 		zmk,physical-layout = &crush80_layout;
-		/* LED controllers: aw20216s0 and aw20216s1 (2x AW20216S via GSPI).
-		 * zmk,underglow not set here — crush80_rgb.c addresses both chips directly.
-		 * Pins confirmed: PE0=CS0, PE1=CLK, PE2=MOSI, PC0=CS1, PC2=power */
 	};
 
 	sram_noinit: sram@9FFF0 {
@@ -357,41 +337,12 @@
 	};
 };
 
-/*
- * AW20216S LED matrix controllers via B91 HSPI hardware SPI
- *
- * CONFIRMED from Ghidra analysis of FUN_ram_0000f2b4 (LED init at 0xF2B4):
- *   PE0 = HSPI CS chip 0   (GPIO active-low, manually toggled)
- *   PE1 = HSPI CLK         (FUNC_C alternate function)
- *   PE2 = HSPI MOSI        (FUNC_C alternate function)
- *   PC0 = HSPI CS chip 1   (GPIO active-low, manually toggled)
- *   PC2 = LED power MOSFET gate (active-high, same as Rainy 75)
- *
- * 154 LEDs × 3 ch = 462 channels. AW20216S max = 216 ch.
- * Two chips required. Channel mapping validated at bring-up.
- *
- * SPI frequency: firmware writes 0x45 to HSPI control (0x80140A02).
- * 0x45 = clock divider suggests ~1 MHz. Start at 1 MHz, increase if stable.
- */
 &pinctrl {
-	/* pad-mul-sel = 1: required for B91 GPIO pin routing. Same as Rainy 75. */
+	/* Required for B91 GPIO pin routing. */
 	pad-mul-sel = <1>;
-
-	/* HSPI pinctrl kept for reference but HSPI node is disabled */
-	hspi_clk_pe1_default: hspi_clk_pe1_default {
-		pinmux = <B91_PINMUX_SET(B91_PORT_E, B91_PIN_1, B91_FUNC_C)>;
-	};
-	hspi_mosi_pe2_default: hspi_mosi_pe2_default {
-		pinmux = <B91_PINMUX_SET(B91_PORT_E, B91_PIN_2, B91_FUNC_C)>;
-	};
 };
 
-/*
- * HSPI disabled: PE0 is needed for kscan row 0 (F-row).
- * The AW20216S LED driver doesn't have a working ZMK driver yet anyway.
- * Re-enable once an AW20216S driver is implemented AND row 0 is moved
- * to a different GPIO (or CS is moved to a non-row pin).
- */
+/* The keyboard matrix uses PE0, PE1 and PE2. */
 &hspi {
 	status = "disabled";
 };

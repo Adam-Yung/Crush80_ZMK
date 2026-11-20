@@ -1,88 +1,43 @@
 ---
-description: Crush80 ZMK firmware project conventions and build workflow
+description: Crush80 ZMK firmware project facts and workflow pointers
 globs:
   - "zmk/**"
   - "conf/**"
   - "build.sh"
-  - "flash.sh"
+  - "update.sh"
+  - "crush80"
   - "scripts/**"
 alwaysApply: false
 ---
 
-# Crush 80 ZMK Project
+# Crush 80 ZMK
 
-## CRITICAL RECOVERY — If Keyboard Is Bricked/Hung
+Rules: `AGENTS.md` (hardware safety rules are binding). Procedures: `docs/guides/install-and-upgrade.md`, `docs/guides/recovery.md`. Current state: `docs/status.md`.
 
-If the keyboard stops typing ~2 seconds after plug-in and `mcumgr` commands stall:
+## Commands
 
-```bash
-python3 scripts/force_recovery.py   # Erases slot 0 header (one command, needs to land in <2s window)
-# Unplug, wait 2s, replug → MCUboot enters serial recovery (no app runs)
-PORT=$(python3 -c "import glob; p=glob.glob('/dev/cu.usbmodem*') or glob.glob('/dev/ttyACM*'); print(p[0] if p else '')")
-~/go/bin/mcumgr --conntype serial --connstring "dev=$PORT,baud=115200" \
-  image upload dist/crush80-zmk-app.signed.MACMODE-WORKING.bin
-# Unplug, wait 2s, replug → keyboard boots working firmware
-```
+- Build: `bash build.sh --skip-bridge` (RGB: add `--rgb`). Output in `dist/` (gitignored). Needs the west workspace; see `docs/guides/build.md`.
+- Validate an image offline: `./crush80 check dist/crush80-zmk-app.signed.bin`
+- Upgrade: `./crush80 update [IMAGE]` (or `bash update.sh`). Trial boot, host confirm.
+- Hung or dead board: `./crush80 recover`
+- Gate before commit: `bash scripts/gate/verify.sh`
 
-**Root cause**: `irq_lock()` + unbounded `while (REG_HSPI_STATUS & HSPI_BUSY) {}` busy-wait.
-Hardware never responds → system hangs permanently with all interrupts masked.
+## Layout
 
-## SAFETY RULES FOR DRIVER DEVELOPMENT
+MCUboot 0x0-0xFFFF, slot 0 (app) 0x10000-0x7FFFF, slot 1 (upload/revert) 0x80000-0xEFFFF, protected 0xFE000+. `docs/features/flash-layout.md`.
 
-1. **NEVER** use unbounded busy-waits (`while(reg) {}`) inside `irq_lock()`.
-   Always add a timeout: `for (int i = 0; i < 100000 && (REG & BIT); i++) {}`
-   If timeout expires, log error and bail — don't hang the system.
+## GPIO (confirmed from the stock firmware)
 
-2. **NEVER** flash firmware that uses `irq_lock` for >1ms without first verifying
-   in a test build that the locked section actually completes.
+- Columns 0-15: PE0, PE1, PE2, PE4, PE5, PE6, PB0, PB1, PB2, PB3, PB4, PB5, PB6, PC0, PC1, PC4
+- Rows 0-5: PD7, PD2, PD3, PD4, PD5, PD6
+- RGB (Reboot Pro): PB7 = PSPI MOSI to the WS2812 chain, PC2 = LED power. `docs/features/rgb.md`.
+- Battery ADC: PD1.
 
-3. **ALWAYS** keep `dist/crush80-zmk-app.signed.MACMODE-WORKING.bin` as a known-good backup.
+## Config source
 
-4. **Before flashing experimental firmware**, ALWAYS verify `mcumgr image list` responds.
-
-5. If the keyboard hangs after flashing: run `python3 scripts/force_recovery.py`
-
-## Default Firmware
-- **Release:** `releases/Crush80-No-RGB.bin` (RGB disabled, battery optimized)
-- Features: Mac mode (Fn+M), HRM, 5 BT profiles (Fn+1-5), USB (Fn+6), 1min idle, 5min deep sleep
-- Logging disabled for battery life (uncomment in app.conf to re-enable)
-- This is the go-to firmware for daily use until RGB is resolved
-
-## Build & Flash
-- Build: `bash build.sh --skip-bridge --skip-mcuboot`
-- Flash: `bash update.sh`
-- Recovery (system hung): `python3 scripts/force_recovery.py` → unplug/replug → upload good firmware
-- Recovery (SMP unresponsive): `python3 scripts/recovery_flash.py` (unplug/replug race)
-
-## Critical Safety Rules
-1. NEVER set `CONFIG_LOG_DEFAULT_LEVEL=4` — floods serial, bricks SMP
-2. NEVER enable HSPI (`&hspi { status = "okay" }`) — PE0/PE1/PE2 are matrix columns
-3. NEVER use unbounded busy-waits inside `irq_lock()` — if hardware doesn't respond, the ENTIRE system hangs permanently (USB, BLE, kscan all die)
-4. Always confirm after flash: `mcumgr image confirm ""`
-5. If SMP times out after flash, use recovery_flash.py (unplug/replug)
-6. If system hangs completely (~2s after boot), use `scripts/force_recovery.py` to enter MCUboot recovery
-7. ALWAYS keep a BACKUP firmware: `dist/crush80-zmk-app.signed.MACMODE-WORKING.bin`
-8. Before flashing experimental firmware, ALWAYS ensure `mcumgr image list` responds
-
-## Architecture
-- MCUboot at 0x0, ZMK app at 0x10000, slot 1 at 0x80000
-- Flash via MCUboot swap: upload → test hash → reset → wait 12s → confirm
-- Serial port: auto-detected via `python3 -c "import glob; p=glob.glob('/dev/cu.usbmodem*') or glob.glob('/dev/ttyACM*'); print(p[0] if p else '')"`
-- mcumgr CLI: ~/go/bin/mcumgr
-
-## GPIO Pin Assignments (CONFIRMED from original firmware binary)
-- Columns (0-15): PE0, PE1, PE2, PE4, PE5, PE6, PB0, PB1, PB2, PB3, PB4, PB5, PB6, PC0, PC1, PC4
-- Rows (0-5): PD7, PD2, PD3, PD4, PD5, PD6
-- Source: Ghidra analysis of FUN_ram_0001a140 calls at offset 0xF078-0xF188
-
-## Keymap Config
-- Source of truth: ~/.config/DOTFILES/keybindings/crush80-zmk/
-- build.sh syncs from dotfiles into repo before building
-- Edit keymap there, then just run `bash flash.sh --build`
+`build.sh` picks the keymap from `CRUSH80_KEYMAP`, else `~/.config/DOTFILES/keybindings/crush80-zmk/`, else `keymaps/stock.keymap`. Edit the keymap there, not in `zmk/boards/crush80/crush80.keymap` (it is overwritten).
 
 ## Debugging
-- Test SMP: `PORT=$(python3 -c "import glob; p=glob.glob('/dev/cu.usbmodem*') or glob.glob('/dev/ttyACM*'); print(p[0] if p else '')"); ~/go/bin/mcumgr --conntype serial --connstring "dev=$PORT,baud=115200" echo hello`
-- Check image: `mcumgr image list`
-- Reset: `mcumgr reset`
-- For kscan debugging, use CONFIG_ZMK_LOG_LEVEL_DBG=y (NOT LOG_DEFAULT_LEVEL=4)
-- Read serial logs: open port with DTR=True via pyserial
+
+- SMP check: `./crush80 status`
+- Kscan debugging: `CONFIG_ZMK_LOG_LEVEL_DBG=y`, never `LOG_DEFAULT_LEVEL=4`.

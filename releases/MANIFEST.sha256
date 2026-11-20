@@ -1,0 +1,3 @@
+# Known-good images. A flash or recovery refuses to run unless these verify.
+# Add a line only after the image has run on the board and been confirmed.
+1aacb028b9cfef092706b9848aaa8cbde15390b77f1263a973f4d5f95a59ea67  Crush80-No-RGB.bin

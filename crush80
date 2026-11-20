@@ -1,0 +1,5 @@
+#!/bin/bash
+# Crush 80 install/upgrade/recovery tool. Run `./crush80 --help`.
+# Standard-library Python only; the only external program is mcumgr.
+DIR="$(cd "$(dirname "$0")" && pwd)"
+exec python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); from crush80.cli import main; sys.exit(main(sys.argv[2:]))' "$DIR/scripts" "$@"

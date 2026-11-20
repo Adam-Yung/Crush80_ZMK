@@ -1,0 +1,21 @@
+---
+description: Hard rule. Agents never download, install or fetch anything; flagged or unverifiable sources are never touched.
+alwaysApply: true
+---
+
+# No flagged or unverified downloads
+
+Never download, fetch, install or load a dataset, model, package, firmware blob or code that a platform (Hugging Face, GitHub, PyPI, npm, crates.io, Go modules, Homebrew,
+Docker registries, anything else) flags as unsafe, that has been removed or quarantined, or whose safety status you cannot read. If the platform API is unreachable or silent,
+fail closed.
+
+Why: on 2026-11-09 an agent pulled a Hugging Face dataset flagged as malicious in another project; the company security team locked the laptop. The download alone was the incident.
+
+Rules:
+1. Agents run no `pip`/`npm`/`go install`/`brew`/`git clone`/`west update`/`curl`/`wget`. Add the item to `scripts/owner/install-deps.sh` (named, pinned, dry run by default), explain it, continue with other work, wait for the owner.
+2. Exception: the owner tells you in the current session to run one specific command. Run exactly that.
+3. No code corpora as data, no pickle or executable model formats, no `trust_remote_code`.
+4. Pinned and hash-checked fetch scripts (`fetch_ble_blob.sh`) are run by the owner, not by agents.
+5. A suspect file already on disk is never opened or run. Delete it, tell the user.
+6. Every subagent prompt that may touch the network restates this rule and forbids downloading.
+7. If unsure, ask.

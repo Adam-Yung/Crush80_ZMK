@@ -11,6 +11,9 @@
  * 4. APPLICATION/99: ZMK/BLE/USB all initialized
  * 5. Post-init work queue (+5s): confirm image, disable WDT
  *
+ * With CONFIG_CRUSH80_MANUAL_CONFIRM (default) step 5 is replaced by a
+ * heartbeat that feeds the WDT until the host confirms the image.
+ *
  * If step 5 never happens, WDT fires -> chip resets ->
  * MCUboot sees unconfirmed image -> reverts to previous firmware.
  *
@@ -38,11 +41,19 @@ LOG_MODULE_REGISTER(mcuboot_confirm, LOG_LEVEL_INF);
 /* Delay before confirmation — wait for USB + BLE to stabilize */
 #define CONFIRM_DELAY_MS        5000
 
+/* Trial boot: how often the watchdog is fed while the image is unconfirmed. */
+#define HEARTBEAT_MS            2000
+
 static const struct device *wdt_dev = DEVICE_DT_GET(DT_NODELABEL(wdt0));
 static int wdt_channel_id = -1;
 
+#if IS_ENABLED(CONFIG_CRUSH80_MANUAL_CONFIRM)
+static void heartbeat_handler(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(heartbeat_work, heartbeat_handler);
+#else
 static void confirm_work_handler(struct k_work *work);
 static K_WORK_DELAYABLE_DEFINE(confirm_work, confirm_work_handler);
+#endif
 
 /* ========================================================================== *
  *  Fatal error handler — force reset instead of infinite spin                *
@@ -62,6 +73,7 @@ void k_sys_fatal_error_handler(unsigned int reason,
  *  Image confirmation (delayed work queue)                                   *
  * ========================================================================== */
 
+#if !IS_ENABLED(CONFIG_CRUSH80_MANUAL_CONFIRM)
 static void confirm_work_handler(struct k_work *work)
 {
 	ARG_UNUSED(work);
@@ -80,9 +92,41 @@ static void confirm_work_handler(struct k_work *work)
 	}
 
 	/* Image is confirmed — disable watchdog */
-	wdt_disable(wdt_dev);
+	if (wdt_channel_id >= 0) {
+		wdt_disable(wdt_dev);
+	}
 	LOG_INF("Watchdog disabled");
 }
+#endif
+
+/* ========================================================================== *
+ *  Trial boot (CONFIG_CRUSH80_MANUAL_CONFIRM)                                *
+ *                                                                            *
+ *  The image is NOT confirmed here. The host confirms it (mcumgr image       *
+ *  confirm) after checking the board by hand. Until then the next cold boot  *
+ *  reverts to the previous image. The watchdog is fed from the system work   *
+ *  queue, so a wedged firmware resets instead of hanging.                    *
+ * ========================================================================== */
+
+#if IS_ENABLED(CONFIG_CRUSH80_MANUAL_CONFIRM)
+static void heartbeat_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+
+	if (boot_is_img_confirmed()) {
+		if (wdt_channel_id >= 0) {
+			wdt_disable(wdt_dev);
+		}
+		LOG_INF("Image confirmed by host — watchdog disabled");
+		return;
+	}
+
+	if (wdt_channel_id >= 0) {
+		wdt_feed(wdt_dev, wdt_channel_id);
+	}
+	k_work_reschedule(&heartbeat_work, K_MSEC(HEARTBEAT_MS));
+}
+#endif
 
 /* ========================================================================== *
  *  Early WDT start (POST_KERNEL) — covers all remaining init                *
@@ -137,9 +181,13 @@ static int mcuboot_confirm_init(void)
 		LOG_INF("WDT fed at APPLICATION — %d ms until revert",
 			CONFIRM_WDT_TIMEOUT_MS);
 	}
-	LOG_INF("Rainy 75 Pro — build %s", BUILD_GIT_VERSION);
+	LOG_INF("Crush 80 — build %s", BUILD_GIT_VERSION);
+#if IS_ENABLED(CONFIG_CRUSH80_MANUAL_CONFIRM)
+	k_work_schedule(&heartbeat_work, K_MSEC(HEARTBEAT_MS));
+#else
 	/* Schedule confirmation after delay — gives USB + BLE time to init */
 	k_work_schedule(&confirm_work, K_MSEC(CONFIRM_DELAY_MS));
+#endif
 	return 0;
 }
 

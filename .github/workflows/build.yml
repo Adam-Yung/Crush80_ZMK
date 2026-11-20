@@ -1,0 +1,115 @@
+# Builds the Crush 80 ZMK application images (plain and RGB) on a clean runner.
+# Download the result with scripts/ci/fetch-build.sh, then flash through ./crush80 only.
+# Nothing here ever touches hardware, and nothing is published as a release.
+name: build
+
+on:
+  push:
+    branches: [main, rgb-and-safe-install]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SDK_VERSION: "0.17.0"
+  WORKSPACE_DIR: /home/runner/Projects/crush80-workspace
+
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - run: bash scripts/gate/verify.sh
+
+  build:
+    needs: gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: System packages
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -q cmake ninja-build device-tree-compiler protobuf-compiler xz-utils
+
+      - name: Zephyr SDK cache
+        id: sdk-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/zephyr-sdk-${{ env.SDK_VERSION }}
+          key: zephyr-sdk-${{ env.SDK_VERSION }}-riscv-linux-x86_64
+
+      - name: Zephyr SDK (minimal + RISC-V toolchain only)
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          base="https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${SDK_VERSION}"
+          f="zephyr-sdk-${SDK_VERSION}_linux-x86_64_minimal.tar.xz"
+          cd "$HOME"
+          curl -fsSL -o "$f" "$base/$f"
+          curl -fsSL -o sha256.sum "$base/sha256.sum"
+          grep " $f\$" sha256.sum | sha256sum -c -     # refuse an archive that does not match the release checksum
+          tar xf "$f" && rm "$f"
+          cd "zephyr-sdk-${SDK_VERSION}"
+          ./setup.sh -t riscv64-zephyr-elf -c           # the setup script verifies each toolchain's hash itself
+
+      - name: Python tools
+        run: pip install "west>=1.5.0" "pyelftools>=0.29" "pykwalify>=1.8.0" protobuf grpcio-tools
+
+      - name: West workspace
+        run: |
+          mkdir -p "$WORKSPACE_DIR"
+          cp -r zmk conf patches fetch_ble_blob.sh "$WORKSPACE_DIR/"
+          cd "$WORKSPACE_DIR"
+          west init -l zmk
+          west update
+          pip install -r zephyr/scripts/requirements-base.txt
+          cmake -P zephyr/share/zephyr-package/cmake/zephyr_export.cmake
+          bash fetch_ble_blob.sh                         # pinned URL, SHA-256 verified, aborts on mismatch
+          bash "$GITHUB_WORKSPACE/patches/apply-patches.sh" "$WORKSPACE_DIR"
+          echo "WORKSPACE_DIR=$WORKSPACE_DIR" > "$GITHUB_WORKSPACE/.workspace_path"
+
+      - name: Build plain image
+        run: |
+          export ZEPHYR_SDK_INSTALL_DIR="$HOME/zephyr-sdk-${SDK_VERSION}"
+          bash build.sh --skip-bridge
+      - name: Build RGB image
+        run: |
+          export ZEPHYR_SDK_INSTALL_DIR="$HOME/zephyr-sdk-${SDK_VERSION}"
+          bash build.sh --skip-bridge --rgb
+
+      - name: Validate images offline and record hashes
+        run: |
+          mkdir -p out
+          for f in crush80-zmk-app.signed.bin crush80-zmk-app-rgb.signed.bin; do
+            ./crush80 check "dist/$f"
+            cp "dist/$f" out/
+          done
+          {
+            echo "commit: $GITHUB_SHA"
+            echo "run:    $GITHUB_RUN_ID"
+            echo "zmk:    $(git -C "$WORKSPACE_DIR/zmk-src" rev-parse HEAD)"
+            echo "zephyr: $(git -C "$WORKSPACE_DIR/zephyr" rev-parse HEAD)"
+          } > out/BUILD-INFO.txt
+          (cd out && sha256sum *.bin > SHA256SUMS)
+          cat out/BUILD-INFO.txt out/SHA256SUMS
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: crush80-firmware-${{ github.sha }}
+          path: out/
+          retention-days: 14
+          if-no-files-found: error

@@ -2,7 +2,6 @@ rsource "drivers/usb/Kconfig"
 rsource "drivers/bluetooth/Kconfig"
 rsource "drivers/sensor/Kconfig"
 rsource "drivers/watchdog/Kconfig"
-rsource "drivers/led/Kconfig"
 
 config BOOT_DIAG
 	bool "Boot diagnostic (.noinit SRAM buffer for SWS debug)"
@@ -28,10 +27,19 @@ config FLASH_MGMT
 	  hardware.
 
 config CRUSH80_RGB
-	bool "Crush80 RGB LED driver (AW20216S via GPIO bit-bang SPI)"
-	default n
-	depends on GPIO
+	bool "Crush 80 Reboot Pro LED strip"
+	depends on DT_HAS_TELINK_B91_SPI_LED_STRIP_ENABLED && GPIO && LED_STRIP
+	select DYNAMIC_INTERRUPTS
 	help
-	  Custom RGB LED driver for the Crush80 keyboard's two AW20216S chips.
-	  Uses GPIO bit-bang SPI on PE0/PE1/PE2 (shared with kscan columns).
-	  Temporarily pauses kscan during LED updates (~3-5ms per frame at 30Hz).
+	  Drives the 154 WS2812-compatible LEDs via PSPI and DMA on PB7.
+	  Enable via conf/rgb.conf and conf/rgb.overlay.
+
+config CRUSH80_MANUAL_CONFIRM
+	bool "Leave new images unconfirmed until the host confirms them"
+	default y
+	depends on BOOTLOADER_MCUBOOT
+	help
+	  Trial boot. A freshly swapped-in image stays unconfirmed, so any
+	  cold boot (unplug and replug) restores the previous image. The
+	  host tool confirms after it has checked the board. Disable only
+	  for builds that must self-confirm with no host present.
