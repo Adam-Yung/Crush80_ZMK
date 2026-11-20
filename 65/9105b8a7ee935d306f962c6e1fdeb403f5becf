@@ -1,0 +1,27 @@
+docs/features/rgb.md
+  s_3a3dad266bc2e8::t_344ca0b91b013a 3,38
+README.md
+  s_3a3dad266bc2e8::t_344ca0b91b013a 105
+docs/todo.md
+  s_3a3dad266bc2e8::t_a6679318bd1368 5-10,12-22
+docs/status.md
+  s_3a3dad266bc2e8::t_344ca0b91b013a 42
+docs/decisions/rgb.md
+  s_3a3dad266bc2e8::t_344ca0b91b013a 20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "659105b8a7ee935d306f962c6e1fdeb403f5becf",
+  "prompts": {},
+  "sessions": {
+    "s_3a3dad266bc2e8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "84108a93-5aa7-4291-bc32-d16b79bdbfc1",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Adam Yung <adyung@paloaltonetworks.com>"
+    }
+  }
+}
