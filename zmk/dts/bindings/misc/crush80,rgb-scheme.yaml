@@ -1,0 +1,31 @@
+description: Per-key backlight scheme for the Crush 80 (RGB build with the per-key engine)
+
+compatible: "crush80,rgb-scheme"
+
+include: base.yaml
+
+properties:
+  layer-modes:
+    type: array
+    required: true
+    description: Per layer index. 0 = dark keys, 1 = light keys by what they do, 2 = ignore this layer (marker layers).
+  layer-side:
+    type: array
+    required: true
+    description: Per layer index, 0xRRGGBB colour of the side bar and logo (0 = dark).
+  layer-side-win:
+    type: array
+    required: true
+    description: Same, used while the Windows marker layer is active.
+  group-colors:
+    type: array
+    required: true
+    description: 0xRRGGBB per key group, in the order arrow, line, word, page, delete, clip, number, symbol, letter, macro, layer, mod, ctrl, fkey, media, desktop, system, danger.
+  mod-colors:
+    type: array
+    required: true
+    description: 0xRRGGBB of a held modifier's own key, in the order Ctrl, Shift, Alt, Gui.
+  overrides:
+    type: array
+    required: true
+    description: Triples of layer index, key position and 0xRRGGBB that win over the group colour. Use <255 0 0> for none.

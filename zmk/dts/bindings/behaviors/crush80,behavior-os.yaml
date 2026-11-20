@@ -1,0 +1,10 @@
+description: Choose the host OS layer set (action 0 = macOS, 1 = Windows, 2 = toggle). The choice is saved.
+
+compatible: "crush80,behavior-os"
+
+include: zero_param.yaml
+
+properties:
+  action:
+    type: int
+    required: true

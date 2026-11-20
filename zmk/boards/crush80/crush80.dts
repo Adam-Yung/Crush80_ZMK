@@ -372,3 +372,45 @@
 &mtimer {
 	interrupts-extended = <&hlic 7>;
 };
+
+/* Backlight and OS-selection behaviours. They exist in every build; without the RGB engine or a
+ * keymap that sets win-layer they do nothing. */
+/ {
+	behaviors {
+		c80rgb_tog: c80rgb_tog {
+			compatible = "crush80,behavior-rgb";
+			#binding-cells = <0>;
+			action = <0>;
+		};
+		c80rgb_bri: c80rgb_bri {
+			compatible = "crush80,behavior-rgb";
+			#binding-cells = <0>;
+			action = <1>;
+		};
+		c80rgb_brd: c80rgb_brd {
+			compatible = "crush80,behavior-rgb";
+			#binding-cells = <0>;
+			action = <2>;
+		};
+		os_mac: os_mac {
+			compatible = "crush80,behavior-os";
+			#binding-cells = <0>;
+			action = <0>;
+		};
+		os_win: os_win {
+			compatible = "crush80,behavior-os";
+			#binding-cells = <0>;
+			action = <1>;
+		};
+		os_tog: os_tog {
+			compatible = "crush80,behavior-os";
+			#binding-cells = <0>;
+			action = <2>;
+		};
+	};
+
+	/* The keymap sets: &c80os_cfg { win-layer = <N>; }; */
+	c80os_cfg: c80os_cfg {
+		compatible = "crush80,os-config";
+	};
+};

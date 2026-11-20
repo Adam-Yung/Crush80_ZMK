@@ -27,6 +27,22 @@ if(CONFIG_POWEROFF)
   zephyr_library_sources(src/poweroff.c)
 endif()
 
+if(CONFIG_CRUSH80_RGB_ENGINE)
+  zephyr_library_named(c80_rgb_engine)
+  zephyr_library_sources(src/rgb/engine.c)
+  zephyr_library_include_directories(
+    ${ZEPHYR_BASE}/../zmk-src/app/include
+    src/rgb
+  )
+endif()
+
+zephyr_library_named(c80_behaviors)
+zephyr_library_sources(src/rgb/c80_beh_rgb.c src/rgb/c80_beh_os.c src/crush80_os.c)
+zephyr_library_include_directories(
+  ${ZEPHYR_BASE}/../zmk-src/app/include
+  src
+)
+
 if(CONFIG_CRUSH80_LAYER_RGB)
   zephyr_library_named(layer_rgb)
   zephyr_library_sources(src/layer_rgb.c)

@@ -1,0 +1,10 @@
+description: Which keymap layer is the Windows marker layer (the keymap sets win-layer; 255 = no OS switching)
+
+compatible: "crush80,os-config"
+
+include: base.yaml
+
+properties:
+  win-layer:
+    type: int
+    default: 255

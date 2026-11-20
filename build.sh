@@ -95,7 +95,7 @@ for d in usb bluetooth sensor watchdog led_strip; do
 done
 
 # Sync DTS bindings for platform drivers
-for d in usb bluetooth sensor watchdog led-strip; do
+for d in usb bluetooth sensor watchdog led-strip behaviors misc; do
     mkdir -p "$WORKSPACE_DIR/zmk/dts/bindings/$d"
     cp -r "$REPO_DIR/zmk/dts/bindings/$d/"* "$WORKSPACE_DIR/zmk/dts/bindings/$d/"
 done
@@ -106,7 +106,7 @@ cp "$REPO_DIR/zmk/Kconfig" "$WORKSPACE_DIR/zmk/"
 mkdir -p "$WORKSPACE_DIR/zmk/zephyr"
 cp "$REPO_DIR/zmk/zephyr/module.yml" "$WORKSPACE_DIR/zmk/zephyr/"
 mkdir -p "$WORKSPACE_DIR/zmk/src" "$WORKSPACE_DIR/zmk/include"
-cp "$REPO_DIR/zmk/src/"* "$WORKSPACE_DIR/zmk/src/" 2>/dev/null || true
+cp -r "$REPO_DIR/zmk/src/"* "$WORKSPACE_DIR/zmk/src/" 2>/dev/null || true
 cp -r "$REPO_DIR/zmk/include/"* "$WORKSPACE_DIR/zmk/include/" 2>/dev/null || true
 
 # Sync conf files
@@ -123,7 +123,14 @@ APP_NAME=crush80-zmk-app
 APP_OVERLAYS=$OVERLAY
 RGB_CPPFLAGS=
 if [ "$ENABLE_RGB" = true ]; then
-    CONF="$CONF;$WORKSPACE_DIR/conf/rgb.conf"
+    # The per-key engine needs a keymap with a crush80,rgb-scheme node; otherwise ZMK's underglow.
+    if [ -n "$KEYMAP" ] && grep -q "crush80,rgb-scheme" "$KEYMAP"; then
+        RGB_FLAVOUR=rgb-engine
+    else
+        RGB_FLAVOUR=rgb-underglow
+    fi
+    echo "RGB flavour: $RGB_FLAVOUR"
+    CONF="$CONF;$WORKSPACE_DIR/conf/rgb.conf;$WORKSPACE_DIR/conf/$RGB_FLAVOUR.conf"
     APP_OVERLAYS="$OVERLAY;$WORKSPACE_DIR/conf/rgb.overlay"
     APP_BUILD_DIR=build-crush80-rgb
     APP_NAME=crush80-zmk-app-rgb
