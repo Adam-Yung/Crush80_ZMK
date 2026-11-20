@@ -54,6 +54,22 @@ def _decode(buf, pos):
     pos += 1
     if major == 7 and info in (20, 21, 22):
         return {20: False, 21: True, 22: None}[info], pos
+    if info == 31 and major in (4, 5):
+        # Indefinite-length array/map (Zephyr's SMP encoder emits these): items until a 0xff break.
+        items = []
+        while True:
+            if pos >= len(buf):
+                raise ValueError("truncated CBOR")
+            if buf[pos] == 0xFF:
+                pos += 1
+                break
+            item, pos = _decode(buf, pos)
+            items.append(item)
+        if major == 4:
+            return items, pos
+        if len(items) % 2:
+            raise ValueError("odd item count in CBOR map")
+        return dict(zip(items[0::2], items[1::2])), pos
     if info < 24:
         n = info
     elif info in (24, 25, 26, 27):
