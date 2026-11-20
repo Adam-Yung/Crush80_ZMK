@@ -1,0 +1,19 @@
+docs/status.md
+  s_3a3dad266bc2e8::t_0f05eacfde0d8c 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "fe114755eea657f0236a6d2cebdeb526b01d2488",
+  "prompts": {},
+  "sessions": {
+    "s_3a3dad266bc2e8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "84108a93-5aa7-4291-bc32-d16b79bdbfc1",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Adam Yung <adyung@paloaltonetworks.com>"
+    }
+  }
+}
