@@ -1,0 +1,19 @@
+zmk/src/rgb/engine.c
+  s_3a3dad266bc2e8::t_0f4a2cb03d602f 257-262,264-265
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "611b0d125deac1566f8e713f3c5aac8e31319e9b",
+  "prompts": {},
+  "sessions": {
+    "s_3a3dad266bc2e8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "84108a93-5aa7-4291-bc32-d16b79bdbfc1",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Adam Yung <adyung@paloaltonetworks.com>"
+    }
+  }
+}
