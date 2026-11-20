@@ -13,3 +13,6 @@ In order. Strike nothing; delete a line when it is done and move the fact to `st
 9. After a week of use: delete `zmk/src/layer_rgb.c` and its Kconfig/CMake entries (decision in `decisions/os-layers.md`); add the confirmed image to `releases/MANIFEST.sha256`.
 10. The earlier password string in this repo's git history (08b88d1): change the password if it was real.
 11. `docs/code/` mirrors for the untouched source files, as they are touched.
+
+- 2026-11-20: Alt+2/Alt+3 print `^[^@` / `^[^[` in a terminal (Alt prefix present, so Alt reaches the host; probably the terminal's Option+digit handling). Retest Option shortcuts in a real app before treating it as a firmware bug.
+- Default firmware: `dist/crush80-default.signed.bin` (local, untracked; `./crush80 update` uses it when present). The personal image is kept in the private keybindings repo (`crush80-zmk/firmware/`), never in this public repo (its macros are inside the binary).

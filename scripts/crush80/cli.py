@@ -8,7 +8,9 @@ from . import device, flows, mcuimg
 from .mcumgr import McumgrError
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DEFAULT_IMAGE = os.path.join(REPO, "dist", "crush80-zmk-app.signed.bin")
+# dist/crush80-default.signed.bin (untracked, owner-local) wins when present: the owner's saved default firmware.
+_LOCAL_DEFAULT = os.path.join(REPO, "dist", "crush80-default.signed.bin")
+DEFAULT_IMAGE = _LOCAL_DEFAULT if os.path.exists(_LOCAL_DEFAULT) else os.path.join(REPO, "dist", "crush80-zmk-app.signed.bin")
 
 
 def _port(args):

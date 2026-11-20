@@ -1,6 +1,6 @@
 # Status
 
-**Last updated:** 2026-11-20 (overnight), branch `rgb-and-safe-install`. The board runs the confirmed single-colour RGB image `871f08b9` in slot 0; slot 1 holds the private colour-per-layer image `a53ab70c` (a trial that reverted, see `incidents/2026-11-20-trial-reverted-on-capslock-f5.md`). The known-good `f0c178a1` is on disk in `releases/` only. **Nothing from the overnight build below has been flashed.**
+**Last updated:** 2026-11-20 (evening). The board runs the confirmed per-key RGB image `ed774974` (firmware commit `611b0d1`, built by the private keybindings CI) in slot 0; slot 1 holds the previous confirmed image `f8768f32`. Verified on the board: held home-row mods light only their own key, Nav palette, typing. Still open: see `todo.md` (Caps+F5, OS persistence, Bluetooth, deep-sleep wake).
 
 ## Works (on the board, before this branch)
 
