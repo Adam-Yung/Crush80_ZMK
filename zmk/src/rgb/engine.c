@@ -286,6 +286,49 @@ static void draw_ambient(bool win) {
     }
 }
 
+/* ---------- held modifiers ---------- */
+
+#define PICK_ALL 0xFF
+
+static const struct zmk_behavior_binding *eff[NPOS]; /* effective binding per position, this frame */
+
+static bool is_hrm(const struct zmk_behavior_binding *b) {
+    return b->behavior_dev && starts(b->behavior_dev, "home_row_mod");
+}
+
+/* Modifier bit (0..7) of a binding whose hold or key is a modifier that is held now, else -1. */
+static int held_mod_bit(const struct zmk_behavior_binding *b, uint8_t held) {
+    uint16_t id = ZMK_HID_USAGE_ID(b->param1);
+
+    if (!b->behavior_dev || id < 0xE0 || id > 0xE7 || !(held & BIT(id - 0xE0))) {
+        return -1;
+    }
+    return id - 0xE0;
+}
+
+/* Home-row mods are recognised by held modifier state because position events do not reliably reach
+ * this listener (engine.c.md). Two home-row keys can share a modifier (left and right hand), so for each
+ * held modifier the pressed bit picks the one key when it names exactly one; otherwise all of that
+ * modifier's home-row keys light. */
+static void pick_home_row_mods(uint8_t held, uint8_t pick[8]) {
+    uint8_t npressed[8] = {0};
+
+    memset(pick, PICK_ALL, 8);
+    for (uint8_t pos = 0; pos < NPOS; pos++) {
+        const struct zmk_behavior_binding *b = eff[pos];
+        int m = b ? held_mod_bit(b, held) : -1;
+        if (m >= 0 && is_hrm(b) && atomic_test_bit(pressed, pos)) {
+            npressed[m]++;
+            pick[m] = pos;
+        }
+    }
+    for (int m = 0; m < 8; m++) {
+        if (npressed[m] != 1) {
+            pick[m] = PICK_ALL;
+        }
+    }
+}
+
 /* Builds the frame; returns true when it animates and needs another one soon. */
 static bool build_frame(void) {
     memset(px, 0, sizeof(px));
@@ -320,25 +363,22 @@ static bool build_frame(void) {
         }
     }
 
-    uint8_t held = zmk_hid_get_explicit_mods();
     for (uint8_t pos = 0; pos < NPOS; pos++) {
-        const struct zmk_behavior_binding *b = effective(pos);
+        eff[pos] = effective(pos);
+    }
+    uint8_t held = zmk_hid_get_explicit_mods();
+    uint8_t pick[8];
+    pick_home_row_mods(held, pick);
+    for (uint8_t pos = 0; pos < NPOS; pos++) {
+        const struct zmk_behavior_binding *b = eff[pos];
         if (!b) {
             continue;
         }
 
-        /* A held home-row mod lights only its own key, in its modifier's colour. Position events do not
-         * reliably reach this listener (the keymap listener can consume them first), so a home-row mod is
-         * recognised by its hold parameter being a modifier that is currently held; each home-row key has
-         * its own modifier usage, so exactly one key lights. A plain modifier key needs the pressed bit. */
-        {
-            const char *bn = b->behavior_dev;
-            uint16_t id = ZMK_HID_USAGE_ID(b->param1);
-            if (bn && id >= 0xE0 && id <= 0xE7 && (held & BIT(id - 0xE0)) &&
-                (starts(bn, "home_row_mod") || atomic_test_bit(pressed, pos))) {
-                put_key(pos, mod_color[(id - 0xE0) & 3]);
-                continue;
-            }
+        int m = held_mod_bit(b, held);
+        if (m >= 0 && (is_hrm(b) ? (pick[m] == PICK_ALL || pick[m] == pos) : atomic_test_bit(pressed, pos))) {
+            put_key(pos, mod_color[m & 3]);
+            continue;
         }
 
         if (layer_mode[top] != MODE_KEYS) {
