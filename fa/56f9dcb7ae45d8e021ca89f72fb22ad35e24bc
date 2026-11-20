@@ -1,0 +1,23 @@
+.github/workflows/build.yml
+  s_081df738a43bde::t_3a76dec3882655 86-94
+zmk/west.yml
+  s_081df738a43bde::t_3a76dec3882655 20-22
+docs/status.md
+  s_081df738a43bde::t_667d4551a0013e 28-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "fa56f9dcb7ae45d8e021ca89f72fb22ad35e24bc",
+  "prompts": {},
+  "sessions": {
+    "s_081df738a43bde": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1a7976f5-f76d-4888-a304-d82b2c845b83",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Adam Yung <adyung@paloaltonetworks.com>"
+    }
+  }
+}
