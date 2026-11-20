@@ -83,6 +83,15 @@ jobs:
           bash "$GITHUB_WORKSPACE/patches/apply-patches.sh" "$WORKSPACE_DIR"
           echo "WORKSPACE_DIR=$WORKSPACE_DIR" > "$GITHUB_WORKSPACE/.workspace_path"
 
+      - name: Show and check dependency pins
+        run: |
+          cd "$WORKSPACE_DIR"
+          west list -f '{name} {revision} {path}' | tee "$RUNNER_TEMP/west-list.txt"
+          for d in zmk-src zephyr modules/hal/hal_telink bootloader/mcuboot; do
+            echo "$d $(git -C "$d" rev-parse HEAD)"
+          done
+          test "$(git -C modules/hal/hal_telink rev-parse HEAD)" = 4226c7fc17d5a34e557d026d428fc766191a0800
+
       - name: Build plain image
         run: |
           export ZEPHYR_SDK_INSTALL_DIR="$HOME/zephyr-sdk-${SDK_VERSION}"

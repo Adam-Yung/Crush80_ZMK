@@ -17,7 +17,9 @@ manifest:
     # Telink HAL — provides B91 Zephyr platform drivers (GPIO, SPI, flash, ADC…)
     - name: hal_telink
       remote: zephyrproject-rtos
-      revision: main
+      # Pinned: CI built with the then-current main and produced an image that did not enumerate.
+      # This is the commit the known-good (MACMODE-WORKING) image was built with.
+      revision: 4226c7fc17d5a34e557d026d428fc766191a0800
       path: modules/hal/hal_telink
 
     # MCUboot — bootloader with watchdog crash-revert safety net

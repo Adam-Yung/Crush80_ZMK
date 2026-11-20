@@ -25,3 +25,7 @@ Keys, USB HID, BLE with 5 profiles, Mac mode, deep sleep, MCUmgr over USB serial
 ## Documentation coverage
 
 `docs/code/` mirrors exist for the files added or changed on this branch (`mcuboot_confirm.c`, `flash_mgmt.c`, the RGB driver, `scripts/crush80/`). The rest of the source tree has none yet; add a mirror when a file is next touched.
+
+## 2026-11-19: first CI image did not enumerate
+CI image (hal_telink at `main`) was swapped in as a trial, showed no serial port, and a power cycle reverted to the known-good image (revert path works).
+Suspected cause: `hal_telink` was unpinned. Now pinned to 4226c7fc (the commit the known-good build used); CI fails if it drifts. Not yet confirmed by a successful trial boot.
