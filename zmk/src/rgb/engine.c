@@ -65,7 +65,8 @@ static const uint32_t layer_side_win[] = DT_INST_PROP(0, layer_side_win);
 static const uint32_t group_color[] = DT_INST_PROP(0, group_colors);
 static const uint32_t mod_color[] = DT_INST_PROP(0, mod_colors);
 static const uint32_t overrides[] = DT_INST_PROP(0, overrides);
-static const uint32_t pos_rc[] = DT_PROP(DT_CHOSEN(zmk_matrix_transform), map);
+#define POS_RC_ENTRY(i, _) DT_PROP_BY_IDX(ZMK_KEYMAP_TRANSFORM_NODE, map, i)
+static const uint32_t pos_rc[] = {LISTIFY(ZMK_KEYMAP_LEN, POS_RC_ENTRY, (, ))};
 
 BUILD_ASSERT(ARRAY_SIZE(layer_mode) == NLAYERS, "layer-modes needs one entry per layer");
 BUILD_ASSERT(ARRAY_SIZE(layer_side) == NLAYERS, "layer-side needs one entry per layer");
