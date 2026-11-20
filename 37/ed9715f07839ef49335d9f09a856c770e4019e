@@ -1,0 +1,25 @@
+docs/status.md
+  s_3a3dad266bc2e8::t_09c84d7ed63344 5-6
+releases/MANIFEST.sha256
+  s_3a3dad266bc2e8::t_a435311c080404 3
+scripts/gate/verify.sh
+  s_3a3dad266bc2e8::t_a9c62029aa3502 23-27
+scripts/tests/test_flows.py
+  s_3a3dad266bc2e8::t_b4740ddadbf1bc 1,59-64
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "37ed9715f07839ef49335d9f09a856c770e4019e",
+  "prompts": {},
+  "sessions": {
+    "s_3a3dad266bc2e8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "84108a93-5aa7-4291-bc32-d16b79bdbfc1",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Adam Yung <adyung@paloaltonetworks.com>"
+    }
+  }
+}
