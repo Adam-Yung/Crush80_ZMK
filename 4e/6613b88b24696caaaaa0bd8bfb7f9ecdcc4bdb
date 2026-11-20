@@ -1,0 +1,25 @@
+zmk/src/rgb/engine.c
+  s_3a3dad266bc2e8::t_f972d882b5f494 75-76,95,292-294,321-331,343
+zmk/dts/bindings/misc/crush80,rgb-scheme.yaml
+  s_3a3dad266bc2e8::t_f972d882b5f494 24,27-31
+docs/code/zmk/src/rgb/engine.c.md
+  s_3a3dad266bc2e8::t_b5fa2c943eaa68 12
+docs/features/rgb.md
+  s_3a3dad266bc2e8::t_ac9dc093a7ef67 62-66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "4e6613b88b24696caaaaa0bd8bfb7f9ecdcc4bdb",
+  "prompts": {},
+  "sessions": {
+    "s_3a3dad266bc2e8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "84108a93-5aa7-4291-bc32-d16b79bdbfc1",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Adam Yung <adyung@paloaltonetworks.com>"
+    }
+  }
+}
