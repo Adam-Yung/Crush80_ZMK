@@ -77,6 +77,7 @@ jobs:
           west init -l zmk
           west update
           pip install -r zephyr/scripts/requirements-base.txt
+          pip install -r bootloader/mcuboot/scripts/requirements.txt   # imgtool (image signing)
           cmake -P zephyr/share/zephyr-package/cmake/zephyr_export.cmake
           bash fetch_ble_blob.sh                         # pinned URL, SHA-256 verified, aborts on mismatch
           bash "$GITHUB_WORKSPACE/patches/apply-patches.sh" "$WORKSPACE_DIR"
