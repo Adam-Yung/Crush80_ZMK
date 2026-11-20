@@ -1,3 +1,4 @@
 # Known-good images. A flash or recovery refuses to run unless these verify.
 # Add a line only after the image has run on the board and been confirmed.
-# (Empty on purpose: the previous image was removed from history with the password scrub; see docs/status.md.)
+# 2026-11-20: clean generic build (stock keymap, no macros) from firmware 37ed971, confirmed on the board.
+2e9fbaf2fe3e1d4d413b585ea7cb1666a7d8b99fd555c14c17968b976d08c25e  Crush80-No-RGB.bin

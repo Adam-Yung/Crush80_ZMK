@@ -23,7 +23,7 @@ step "known-good images"
 if grep -qv -e '^#' -e '^[[:space:]]*$' releases/MANIFEST.sha256 2>/dev/null; then
     run ./crush80 golden
 else
-    echo "WARNING: releases/MANIFEST.sha256 lists no known-good image yet (the old one was removed with the password scrub); update and recover refuse to run until one is added"
+    echo "WARNING: releases/MANIFEST.sha256 lists no known-good image yet (removed); update and recover refuse to run until one is added"
 fi
 
 step "kconfig/dts sanity (greps, not a compile)"
