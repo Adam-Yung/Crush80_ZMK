@@ -254,12 +254,15 @@ static void build_frame(void) {
             continue;
         }
 
-        /* A held modifier lights only its own key. The modifier is the hold parameter of a home-row mod
-         * or the usage of a plain modifier key; any binding whose first parameter is a modifier usage
-         * qualifies (a layer-tap's first parameter is a small layer number, never 0xE0 or more). */
-        if (atomic_test_bit(pressed, pos)) {
+        /* A held home-row mod lights only its own key, in its modifier's colour. Position events do not
+         * reliably reach this listener (the keymap listener can consume them first), so a home-row mod is
+         * recognised by its hold parameter being a modifier that is currently held; each home-row key has
+         * its own modifier usage, so exactly one key lights. A plain modifier key needs the pressed bit. */
+        {
+            const char *bn = b->behavior_dev;
             uint16_t id = ZMK_HID_USAGE_ID(b->param1);
-            if (id >= 0xE0 && id <= 0xE7 && (held & BIT(id - 0xE0))) {
+            if (bn && id >= 0xE0 && id <= 0xE7 && (held & BIT(id - 0xE0)) &&
+                (starts(bn, "home_row_mod") || atomic_test_bit(pressed, pos))) {
                 put_key(pos, mod_color[(id - 0xE0) & 3]);
                 continue;
             }
