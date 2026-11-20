@@ -34,7 +34,7 @@
 #include <zmk/events/activity_state_changed.h>
 #include <zmk/events/endpoint_changed.h>
 #include <zmk/events/layer_state_changed.h>
-#include <zmk/events/modifiers_state_changed.h>
+#include <zmk/events/keycode_state_changed.h>
 #include <zmk/events/position_state_changed.h>
 #include <zmk/events/usb_conn_state_changed.h>
 #include <zmk/hid.h>
@@ -254,16 +254,11 @@ static void build_frame(void) {
             continue;
         }
 
-        /* A held modifier lights only its own key. */
+        /* A held modifier lights only its own key. The modifier is the hold parameter of a home-row mod
+         * or the usage of a plain modifier key; any binding whose first parameter is a modifier usage
+         * qualifies (a layer-tap's first parameter is a small layer number, never 0xE0 or more). */
         if (atomic_test_bit(pressed, pos)) {
-            const char *n = b->behavior_dev;
-            uint32_t usage = 0;
-            if (n && starts(n, "home_row_mod")) {
-                usage = b->param1;
-            } else if (n && !strcmp(n, "key_press")) {
-                usage = b->param1;
-            }
-            uint16_t id = ZMK_HID_USAGE_ID(usage);
+            uint16_t id = ZMK_HID_USAGE_ID(b->param1);
             if (id >= 0xE0 && id <= 0xE7 && (held & BIT(id - 0xE0))) {
                 put_key(pos, mod_color[(id - 0xE0) & 3]);
                 continue;
@@ -412,7 +407,9 @@ static int listener(const zmk_event_t *eh) {
 ZMK_LISTENER(c80rgb, listener);
 ZMK_SUBSCRIPTION(c80rgb, zmk_layer_state_changed);
 ZMK_SUBSCRIPTION(c80rgb, zmk_position_state_changed);
-ZMK_SUBSCRIPTION(c80rgb, zmk_modifiers_state_changed);
+/* ZMK never raises zmk_modifiers_state_changed; a modifier press or release (a home-row mod resolving
+ * to its hold, or a plain modifier key) shows up as a keycode event. */
+ZMK_SUBSCRIPTION(c80rgb, zmk_keycode_state_changed);
 ZMK_SUBSCRIPTION(c80rgb, zmk_activity_state_changed);
 ZMK_SUBSCRIPTION(c80rgb, zmk_endpoint_changed);
 ZMK_SUBSCRIPTION(c80rgb, zmk_usb_conn_state_changed);
