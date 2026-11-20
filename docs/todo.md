@@ -10,7 +10,7 @@ In order. Strike nothing; delete a line when it is done and move the fact to `st
 5. Retest Option shortcuts in a real app. Alt+2 / Alt+3 print `^[^@` / `^[^[` in a terminal (Alt prefix is present, so Alt reaches the host; probably the terminal's handling of Option+digit).
 
 **Risk and hygiene**
-6. The earlier password string in this repo's git history (08b88d1): change the password if it was real.
+6. Password: rotated by the owner 2026-11-20 and scrubbed from history. Still open: ask GitHub Support to purge the old commits (cached views and the `refs/pull/2` refs); then delete `dist/golden-old-DO-NOT-PUBLISH/`.
 7. USB upload stalls (one earlier case, none recently): if they return, try upstream's Zephyr USB transfer-slot patches (RitwickVerma/Crush80_ZMK `patches/zephyr/0004`-`0013`, 0009 first) on a branch.
 
 **Later**
