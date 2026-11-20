@@ -1,0 +1,29 @@
+docs/guides/hardware-test-plan.md
+  s_3a3dad266bc2e8::t_4daf5470f4db7f 61-76
+docs/guides/keymap.md
+  s_3a3dad266bc2e8::t_4daf5470f4db7f 16-20
+README.md
+  s_3a3dad266bc2e8::t_01aab596f1aa05 8
+docs/glossary.md
+  s_3a3dad266bc2e8::t_afbc15e42cd15e 22-28
+docs/status.md
+  s_3a3dad266bc2e8::t_01bbef51cb5d3a 3,44-52
+docs/todo.md
+  s_3a3dad266bc2e8::t_c057e918a88807 5-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "d5b750c7e674eedcadf02f39d7814b7cba1a290b",
+  "prompts": {},
+  "sessions": {
+    "s_3a3dad266bc2e8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "84108a93-5aa7-4291-bc32-d16b79bdbfc1",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Adam Yung <adyung@paloaltonetworks.com>"
+    }
+  }
+}
