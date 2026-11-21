@@ -1,0 +1,21 @@
+docs/status.md
+  s_b57a39e2c9df61::t_b6952a30b7c3d6 61-62
+  s_b57a39e2c9df61::t_7a7dcdea1c2fdc 64-65
+  s_b57a39e2c9df61::t_cf0f037a24e9d1 63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "2d1f2aa7f8b6b81fb4d4486819326a206e99f07e",
+  "prompts": {},
+  "sessions": {
+    "s_b57a39e2c9df61": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "830fd5ba-debe-4880-904f-471c27c1150c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Adam Yung <adyung@paloaltonetworks.com>"
+    }
+  }
+}
